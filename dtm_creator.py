@@ -12,8 +12,7 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 
-data_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "energy_policy_applied_energy__coal_journals.csv")
-bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['DTM_ROOT'], "dtm", "BIGRAMS.txt")
 
 class DTMCreator:
     def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, seed=42, limit=None):
@@ -178,67 +177,72 @@ class DTMCreator:
         self.preprocess_paras(write_vocab=True)
         self.write_files()
 
+class HansardDTMCreator(DTMCreator):
+    def _extract_dates(self, date_col_name):
+        return [int(d.split("-")[2]) for d in self.df[date_col_name].tolist()]
 
 def create_model_inputs(model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, seed=42, limit=None):
-    jdtmc = DTMCreator(model_root, csv_path, text_col_name=text_col_name, date_col_name=date_col_name, bigram=bigram, seed=seed, limit=limit)
+    jdtmc = HansardDTMCreator(model_root, csv_path, text_col_name=text_col_name, date_col_name=date_col_name, bigram=bigram, seed=seed, limit=limit)
     jdtmc.create()
 
 def fit_mult_model(model_root_dir):
     with open("runs.json", "r") as fp:
         data = json.load(fp)
     for run in data:
-        outpath = f"/data/greyroads/energy-roadmap/DTM/{model_root_dir}/model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}"
+        outpath = os.path.join(os.environ['DTM_ROOT'], "dtm", model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
         print(outpath)
         if not os.path.isdir(outpath):
             os.mkdir(outpath)
-        os.system(f"/data/greyroads/energy-roadmap/DTM/dtm/dtm/main   --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix=/data/greyroads/energy-roadmap/DTM/{model_root_dir}/eiajournal   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10")
+        cmd = os.path.join(os.environ['DTM_ROOT'], "dtm", "dtm", "main") + f" --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix={os.environ['DTM_ROOT']}dtm/{model_root_dir}/model   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10"
+        print(cmd)
+        os.system(cmd)
     return 1
 
-def create_mult_datasets():
-    datasets_to_create = [
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_all",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "bigram": False
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_all_bigram",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "bigram": True
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_biofuels",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv"),
-            "bigram": False
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv"),
-            "bigram": True
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_solar",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_solar.csv"),
-            "bigram": False
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_solar.csv"),
-            "bigram": True
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_coal",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_coal.csv"),
-            "bigram": False
-        },
-        {
-            "model_root": "journal_energy_policy_applied_energy_all_years_abstract_coal_bigram",
-            "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_coal.csv"),
-            "bigram": True
-        }
-    ]
-    for dataset in datasets_to_create:
-        create_model_inputs(dataset['model_root'], dataset['df_path'], dataset['bigram'])
+# def create_mult_datasets():
+#     datasets_to_create = [
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_all",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
+#             "bigram": False
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_all_bigram",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
+#             "bigram": True
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_biofuels",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv"),
+#             "bigram": False
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv"),
+#             "bigram": True
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_solar",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_solar.csv"),
+#             "bigram": False
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_solar.csv"),
+#             "bigram": True
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_coal",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_coal.csv"),
+#             "bigram": False
+#         },
+#         {
+#             "model_root": "journal_energy_policy_applied_energy_all_years_abstract_coal_bigram",
+#             "df_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_coal.csv"),
+#             "bigram": True
+#         }
+#     ]
+#     for dataset in datasets_to_create:
+#         create_model_inputs(dataset['model_root'], dataset['df_path'], dataset['bigram'])
 
 # def fit_mult_datasets():
 #     datasets = [
@@ -265,9 +269,9 @@ if __name__ == "__main__":
     # model_root = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram")
     # # the path to the journal paragraphs that are to become part of the fitting data for the topic model.
     # data_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv")
-    create_model_inputs("1000subset_coal", os.path.join(), bigram=False)
+    # create_model_inputs("1000subset_coal", os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=1000)
     # create_mult_datasets()
     # fit_mult_datasets()
-    # fit_mult_model("journal_energy_policy_applied_energy_all_years_abstract_all_bigram")
+    fit_mult_model("dataset_1000subset_coal")
 
     # pid 7380
