@@ -1,3 +1,5 @@
 dataset_*
 *.log
 dtm/
+__pycache__/
+runs.json

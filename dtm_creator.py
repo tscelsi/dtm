@@ -12,10 +12,12 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 
-bigram_path = os.path.join(os.environ['DTM_ROOT'], "dtm", "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+SEED = 42
+
 
 class DTMCreator:
-    def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, seed=42, limit=None):
+    def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, limit=None):
         self.df = pd.read_csv(csv_path)
         self.df = self.df.dropna(subset=[text_col_name])
         self.paragraphs = self.df[text_col_name].tolist()
@@ -35,14 +37,14 @@ class DTMCreator:
         self.rdocs =[]
         self.rdates = []
         if limit:
-            for idx in random.RandomState(seed).permutation(len(self.paragraphs))[:limit]:
+            for idx in random.RandomState(SEED).permutation(len(self.paragraphs))[:limit]:
                 try:
                     self.rdocs.append(self.nlp(self.paragraphs[idx]))
                     self.rdates.append(self.dates[idx])
                 except:
                     print(idx)
         else:
-            for idx in random.RandomState(seed).permutation(len(self.paragraphs)):
+            for idx in random.RandomState(SEED).permutation(len(self.paragraphs)):
                 try:
                     self.rdocs.append(self.nlp(self.paragraphs[idx]))
                     self.rdates.append(self.dates[idx])
@@ -56,9 +58,12 @@ class DTMCreator:
         In this case, the df has a column labelled 'date' which contains a date of form 2020-10-09. 
         We extract the year (2020) for each doc in the df.
 
+        An simple example function could be:
+            return [int(d.split("-")[0]) for d in self.df[date_col_name].tolist()]
+
         MAKE GENERAL
         """
-        return [int(d.split("-")[0]) for d in self.df[date_col_name].tolist()]
+        raise NotImplementedError
 
     def _add_bigrams(self):
         bigrams = [x.strip("\n") for x in open(bigram_path, "r").readlines()]
@@ -79,7 +84,7 @@ class DTMCreator:
                 new_paras.append(para.text)
         self.rdocs = self.nlp.pipe(new_paras, n_process=11, batch_size=256)
 
-    def preprocess_paras(self, write_vocab=False):
+    def preprocess_paras(self, min_freq=150, write_vocab=False):
         if self.bigram:
             print("adding bigrams...")
             self._add_bigrams()
@@ -146,7 +151,7 @@ class DTMCreator:
                 self.paras_to_wordcounts.append(' '.join(id_counts))
                 self.years_final.append(self.rdates[idx])
 
-    def write_files(self):
+    def write_files(self, min_year=None, max_year=None):
         # write -mult file and -seq file
         outmult = open(os.path.join(self.model_root, "model-mult.dat"), 'w+')
         outyear = open(os.path.join(self.model_root, "model-year.dat"), 'w+')
@@ -157,7 +162,11 @@ class DTMCreator:
         print(len(self.paras_to_wordcounts))
 
         yearcount = defaultdict(lambda:0)
-        for year in range(min(self.dates), max(self.dates), 1):
+
+        min_date = min_year if min_year else min(self.dates)
+        max_date = max_year if max_year else max(self.dates)
+
+        for year in range(min_date, max_date, 1):
             for idx, yy in enumerate(self.years_final):
                 if year ==yy:
                     yearcount[year]+=1
@@ -177,25 +186,24 @@ class DTMCreator:
         self.preprocess_paras(write_vocab=True)
         self.write_files()
 
-class HansardDTMCreator(DTMCreator):
-    def _extract_dates(self, date_col_name):
-        return [int(d.split("-")[2]) for d in self.df[date_col_name].tolist()]
-
-def create_model_inputs(model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, seed=42, limit=None):
-    jdtmc = HansardDTMCreator(model_root, csv_path, text_col_name=text_col_name, date_col_name=date_col_name, bigram=bigram, seed=seed, limit=limit)
-    jdtmc.create()
+def fit(run, model_root_dir):
+    outpath = os.path.join(os.environ['DTM_ROOT'], "dtm", model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
+    print(outpath)
+    if not os.path.isdir(outpath):
+        os.mkdir(outpath)
+    cmd = os.path.join(os.environ['DTM_ROOT'], "dtm", "dtm", "main") + f" --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix={os.environ['DTM_ROOT']}dtm/{model_root_dir}/model   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10"
+    print(cmd)
+    os.system(cmd)
+    return 1
 
 def fit_mult_model(model_root_dir):
     with open("runs.json", "r") as fp:
         data = json.load(fp)
-    for run in data:
-        outpath = os.path.join(os.environ['DTM_ROOT'], "dtm", model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
-        print(outpath)
-        if not os.path.isdir(outpath):
-            os.mkdir(outpath)
-        cmd = os.path.join(os.environ['DTM_ROOT'], "dtm", "dtm", "main") + f" --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix={os.environ['DTM_ROOT']}dtm/{model_root_dir}/model   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10"
-        print(cmd)
-        os.system(cmd)
+    with Pool(processes=11) as pool:
+        multiple_results = [pool.apply_async(fit, (run, model_root_dir, ))for run in data]
+    print("here")
+    for res in multiple_results:
+        print(res.get())
     return 1
 
 # def create_mult_datasets():
@@ -272,6 +280,6 @@ if __name__ == "__main__":
     # create_model_inputs("1000subset_coal", os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=1000)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model("dataset_1000subset_coal")
+    fit_mult_model("dataset_20000subset_coal")
 
     # pid 7380

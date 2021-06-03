@@ -10,10 +10,12 @@ import os
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import numpy as np
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 import matplotlib.pylab as plt
 from pprint import pprint
 import seaborn as sns
+from spacy.matcher import PhraseMatcher
+import spacy
 
 EUROVOC_PATH = os.path.join("eurovoc_export_en.csv")
 
@@ -71,7 +73,7 @@ class TDMAnalysis:
         model_out_dir="model_run",
         eurovoc_whitelist=True
         ):
-        # self.nlp = spacy.load("en_core_web_sm")
+        self.nlp = spacy.load("en_core_web_sm")
         self.ndocs = ndocs
         self.ntopics = ntopics
         self.eurovoc_whitelist = eurovoc_whitelist
@@ -193,6 +195,65 @@ class TDMAnalysis:
         df = df.pivot(index='year', columns='topic_name', values='proportion')
         return df
 
+    def create_eurovoc_topic_term_map(self):
+        self.eurovoc_topic_term_map = {}
+        self.eurovoc_total_term_len = 0
+        self.eurovoc_topic_lengths = defaultdict(lambda: 0)
+        self.eurovoc_topics = set()
+        for term, topic in zip(self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner'], batch_size=256, n_process=11), self.eurovoc['MT'].apply(lambda x: x.lower())):
+            self.eurovoc_topics.add(topic)
+            self.eurovoc_topic_lengths[topic] += len(term)
+            if topic in self.eurovoc_topic_term_map:
+                for t in term:
+                    self.eurovoc_topic_term_map[topic].add(t.lemma_)
+            else:
+                self.eurovoc_topic_term_map[topic] = set([t.lemma_ for t in term])
+        self.eurovoc_topics = np.array(list(self.eurovoc_topics))
+        print("finished.")
+
+    def get_topic_tfidf_scores(self, top_terms):
+        """
+        Returns a matrix for a DTM topic where the rows represent a top term for the dtm topic, and the columns
+        represent each EuroVoc topic. Each cell is the tfidf value of a particular term-topic
+        combination. This will be used when calculating the automatic EuroVoc topic labels for the
+        DTM topics.
+
+        i.e. shape is | top_terms | x | EuroVoc Topics |
+        """
+        tfidf_mat = np.zeros((len(top_terms), len(self.eurovoc_topics)))
+        # number of documents containing a term
+        N = Counter()
+        # ensure to get rid of the underscores in bigram terms and then rejoin with space
+        # i.e. 'greenhouse_gas' becomes 'greenhouse gas'
+        spacy_terms = [t for t in self.nlp.pipe([" ".join(t.split("_")) for _, t in top_terms], disable=['tok2vec', 'ner', 'parser', 'tagger'], n_process=11)]
+        self.eurovoc_term_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA", validate=True)
+        for term in spacy_terms:
+            self.eurovoc_term_matcher.add(term.text, spacy_terms)
+        ## term freq
+        ## total terms in each topic (doc)
+        ## number of docs that match term
+        ## total number of docs
+        for i, topic in enumerate(self.eurovoc_topic_term_map):
+            term_freq = Counter()
+            doc_len = self.eurovoc_topic_lengths[topic]
+            terms_contained_in_topic = set()
+            curr_ev_topic = self.eurovoc_topic_term_map[topic]
+            matches = self.eurovoc_term_matcher(curr_ev_topic)
+            breakpoint()
+            if matches:
+                for match_id, _, _ in matches:
+                    terms_contained_in_topic.add(match_id)
+                    ev_topic = self.nlp.vocab.strings[match_id]
+                    term_freq[ev_topic] += 1
+                for q in term_freq:
+                    ind = np.where(self.eurovoc_topics == q)
+                    tf = term_freq[q] / self.eurovoc_topic_lengths[q]
+                    idf = np.log(len(self.eurovoc_topics)/len(term_freq.keys()))
+                    tfidf_score = tf * idf
+                    tfidf_mat[i][ind] = tfidf_score
+            N.update(terms_contained_in_topic)
+                
+
     def eurovoc_lookup(self, word, prob):
         """
         This function takes in a word and its associated probability of
@@ -231,10 +292,11 @@ class TDMAnalysis:
         """
         self._init_eurovoc(EUROVOC_PATH)
         topic_names = {} if detailed else []
+        self.create_eurovoc_topic_matcher()
         for i in range(self.ntopics):
-            breakpoint()
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
+            self.get_topic_tfidf_scores(top_words)
             if auto:
                 curr_topic_name = self.get_auto_topic_name(top_words, i)
             else:
@@ -296,7 +358,7 @@ class TDMAnalysis:
             raise Exception
         assert len(topic_word_distributions) == len(self.vocab) * len(self.years), print("WRONG VOCAB!!")
 
-        word_dist_arr = np.exp(np.reshape([np.float(x) for x in topic_word_distributions], (len(self.vocab), len(self.years))).T)
+        word_dist_arr = np.exp(np.reshape([float(x) for x in topic_word_distributions], (len(self.vocab), len(self.years))).T)
         return word_dist_arr
 
     def create_top_words_df(self, n=10):
@@ -379,19 +441,20 @@ class TDMAnalysis:
         
 
 if __name__ == "__main__":
-    NDOCS = 3078 # number of lines in -mult.dat file.
+    NDOCS = 931 # number of lines in -mult.dat file.
     NTOPICS = 15
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram"),
-        doc_year_map_file_name="eiajournal-year.dat",
-        seq_dat_file_name="eiajournal-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_1000subset_coal"),
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="model_run_topics15_alpha0.01_topic_var0.001")
+        model_out_dir="model_run_topics15_alpha0.01_topic_var0.05",
+        eurovoc_whitelist=False
+        )
     topic_names = tdma.get_topic_names(auto=True, detailed=True)
-
-    pprint(topic_names.keys())
+    # breakpoint()
     # df = tdma.create_top_words_df(n=20)
     # breakpoint()
     # for i in range(10):

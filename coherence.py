@@ -1,6 +1,7 @@
 from analysis import TDMAnalysis
-from dtm_creator import DTMCreator
+from hansard_dtm_creator import HansardDTMCreator
 from greyroads_dtm_creator import GreyroadsDTMCreator
+from journals_dtm_creator import JournalDTMCreator
 from gensim.models.coherencemodel import CoherenceModel
 from gensim.corpora import Dictionary
 import os
@@ -9,15 +10,17 @@ import numpy as np
 import traceback
 
 class CoherenceAnalysis(TDMAnalysis):
-    def __init__(self, data_path, _type, bigram, *args, **kwargs):
+    def __init__(self, data_path, _type, text_col_name, date_col_name, bigram, limit, *args, **kwargs):
         super().__init__(*args, **kwargs)
         model_root = kwargs.get('model_root')
-        if _type == "journal":
-            self.dc = JournalDTMCreator(model_root, data_path, bigram=bigram)
+        if _type == "hansard":
+            self.dc = HansardDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
         elif _type == "greyroads":
-            self.dc = GreyroadsDTMCreator(model_root, data_path, bigram=bigram)
+            self.dc = GreyroadsDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
+        elif _type == "journals":
+            self.dc = JournalDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
         else:
-            print("need to specify one of journal|greyroads types.")
+            print("need to specify 'hansard' as type.")
             sys.exit(1)
 
     def init_coherence(self):
