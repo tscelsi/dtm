@@ -41,6 +41,34 @@ def analyse(coh, ds, model, coherences):
             for row in top_words_for_topic.itertuples():
                 fp.write(f"{row.year}\t{row.top_words}\n")
 
+def analyse_model():
+    dataset = {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
+        "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
+        "ndocs": 19971,
+        "bigram": True
+    }
+    MODEL_NAME = "model_run_topics30_alpha0.01_topic_var0.05"
+    coherences = {}
+    coh = CoherenceAnalysis(
+                dataset['data_path'],
+                "journals",
+                "section_txt",
+                "date",
+                dataset['bigram'],
+                dataset.get("limit"),
+                dataset['ndocs'], 
+                int(MODEL_NAME.split("_")[2].split("topics")[1]), 
+                model_root=dataset['model_root'],
+                doc_year_map_file_name="eiajournal-year.dat",
+                seq_dat_file_name="eiajournal-seq.dat",
+                vocab_file_name="vocab.txt",
+                model_out_dir=MODEL_NAME,
+                eurovoc_whitelist=False
+            )
+    coh.init_coherence()
+    analyse(coh, dataset, MODEL_NAME, coherences)
+
 
 def hansard_analyse_multi_models():
     datasets = [
@@ -180,4 +208,5 @@ def validate_multi_models():
 if __name__ == "__main__":
     # greyroads_analyse_multi_models()
     # validate_multi_models()
-    hansard_analyse_multi_models()
+    # hansard_analyse_multi_models()
+    analyse_model()

@@ -211,7 +211,7 @@ class TDMAnalysis:
         self.eurovoc_topics = np.array(list(self.eurovoc_topic_docs.keys()))
         print("finished.")
 
-    def get_topic_tfidf_scores(self, top_terms):
+    def get_topic_tfidf_scores(self, top_terms, tfidf_enabled=False):
         """
         Returns a matrix for a DTM topic where the rows represent a top term for the dtm topic, and the columns
         represent each EuroVoc topic. Each cell is the tfidf value of a particular term-topic
@@ -260,7 +260,11 @@ class TDMAnalysis:
                     tf = curr_tfs[term] / doc_len
                     idf = np.log(len(self.eurovoc_topic_docs.keys()) / N[term])
                     tfidf = tf * idf
-                    self.tfidf_mat[ind][i] = tfidf
+                    if tfidf_enabled:
+                        self.tfidf_mat[ind][i] = tfidf
+                    else:
+                        # just idf
+                        self.tfidf_mat[ind][i] = idf
             except KeyError as e:
                 continue
         return self.tfidf_mat
@@ -306,18 +310,15 @@ class TDMAnalysis:
         return c
         
 
-
     def get_auto_topic_name(self, top_words, i, top_n=4):
         auto_topic_suggestions = Counter()
         weighted_ev_topics = self.eurovoc_lookup_2(top_words)
-        for prob, w in top_words:
-            weighted_topics_for_w = self.eurovoc_lookup(w, prob)
-            auto_topic_suggestions.update(weighted_topics_for_w)
-        print("NEW TF-IDF INCLUDED METHOD")
-        print([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)])
-        print("OLD NO TF-IDF METHOD")
-        print(str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i))
-        return str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i)
+        # for prob, w in top_words:
+        #     weighted_topics_for_w = self.eurovoc_lookup(w, prob)
+        #     auto_topic_suggestions.update(weighted_topics_for_w)
+        # print([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)])
+        # str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i), 
+        return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
 
     def get_topic_names(self, auto=True, detailed=False):
         """
@@ -329,10 +330,9 @@ class TDMAnalysis:
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
-            tfidf_mat = self.get_topic_tfidf_scores(top_words)
+            self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
             if auto:
                 curr_topic_name = self.get_auto_topic_name(top_words, i)
-                breakpoint()
             else:
                 curr_topic_name = str([x[1]+str(i) for x in top_words[:3]])
             if detailed:
@@ -476,7 +476,7 @@ class TDMAnalysis:
 
 if __name__ == "__main__":
     NDOCS = 19971 # number of lines in -mult.dat file.
-    NTOPICS = 15
+    NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
@@ -484,10 +484,10 @@ if __name__ == "__main__":
         doc_year_map_file_name="eiajournal-year.dat",
         seq_dat_file_name="eiajournal-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="model_run_topics15_alpha0.01_topic_var0.05",
+        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
         eurovoc_whitelist=False,
         )
-    topic_names = tdma.get_topic_names(auto=True, detailed=True)
+    topic_names = tdma.get_topic_names(auto=True, detailed=False)
     # breakpoint()
     # df = tdma.create_top_words_df(n=20)
     # breakpoint()

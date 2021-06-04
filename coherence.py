@@ -20,7 +20,7 @@ class CoherenceAnalysis(TDMAnalysis):
         elif _type == "journals":
             self.dc = JournalDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
         else:
-            print("need to specify 'hansard' as type.")
+            print("need to specify one of 'hansard|greyroads|journals' as type.")
             sys.exit(1)
 
     def init_coherence(self):

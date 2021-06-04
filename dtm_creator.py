@@ -12,7 +12,8 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 
-bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
 SEED = 42
 
 
@@ -33,7 +34,7 @@ class DTMCreator:
         # self.nlp.remove_pipe("tagger")
         self.nlp.remove_pipe("parser")
         self.nlp.remove_pipe("ner")
-        self.nlp.add_pipe(self.nlp.create_pipe('sentencizer'))
+        self.nlp.add_pipe('sentencizer')
         self.rdocs =[]
         self.rdates = []
         if limit:
