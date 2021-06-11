@@ -151,6 +151,16 @@ class DTMCreator:
                 id_counts = [f"{len(type_counts)}"]+[f"{wids[k]}:{v}" for k,v in type_counts.most_common()]
                 self.paras_to_wordcounts.append(' '.join(id_counts))
                 self.years_final.append(self.rdates[idx])
+        breakpoint()
+
+    def downsample(self, upper_limit=1000):
+        """
+        This function is used to downsample years where there are more than the upper_limit number of documents.
+        This will avoid oversampling certain years and hence skewing the models in favour of those years.
+        This is typical behaviour for journals dataset, which has a lot more documents in the later years
+        than earlier.
+        """
+
 
     def write_files(self, min_year=None, max_year=None):
         # write -mult file and -seq file
