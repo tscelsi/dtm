@@ -12,18 +12,19 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 
-# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+# bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
 SEED = 42
 
 
 class DTMCreator:
-    def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, limit=None):
+    def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, limit=None, years_per_step=1):
         self.df = pd.read_csv(csv_path)
         self.df = self.df.dropna(subset=[text_col_name])
         self.paragraphs = self.df[text_col_name].tolist()
         self.dates = self._extract_dates(date_col_name)
         self.bigram = bigram
+        self.years_per_step = years_per_step
         # create directory structure
         if not os.path.isdir(model_root):
             os.mkdir(model_root)
@@ -37,20 +38,13 @@ class DTMCreator:
         self.nlp.add_pipe('sentencizer')
         self.rdocs =[]
         self.rdates = []
+        rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))]
         if limit:
-            for idx in random.RandomState(SEED).permutation(len(self.paragraphs))[:limit]:
-                try:
-                    self.rdocs.append(self.nlp(self.paragraphs[idx]))
-                    self.rdates.append(self.dates[idx])
-                except:
-                    print(idx)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes[:limit]], n_process=11, batch_size=256)
+            self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
         else:
-            for idx in random.RandomState(SEED).permutation(len(self.paragraphs)):
-                try:
-                    self.rdocs.append(self.nlp(self.paragraphs[idx]))
-                    self.rdates.append(self.dates[idx])
-                except:
-                    print(idx)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes], n_process=11, batch_size=256)
+            self.rdates = [self.dates[i] for i in rand_indexes]
         return
 
     def _extract_dates(self, date_col_name):
@@ -84,6 +78,13 @@ class DTMCreator:
             else:
                 new_paras.append(para.text)
         self.rdocs = self.nlp.pipe(new_paras, n_process=11, batch_size=256)
+
+    def _get_year_batches(self):
+        year_mapping = {}
+        for date in self.rdates:
+            batch_num = int((date - min(self.rdates)) / self.years_per_step)
+            year_mapping[date] = batch_num
+        return year_mapping
 
     def preprocess_paras(self, min_freq=150, write_vocab=False):
         if self.bigram:
@@ -122,7 +123,7 @@ class DTMCreator:
                     wcounts[w]+=1           
 
         # PREPROCESS: keep types that occur at least 150 times
-        wcounts = {k:v for k,v in wcounts.items() if v>150} 
+        wcounts = {k:v for k,v in wcounts.items() if v>min_freq} 
 
         # collect word IDs
         for d in self.paras_processed:
@@ -143,6 +144,10 @@ class DTMCreator:
         self.paras_to_wordcounts = []
         self.years_final = []
 
+        # if we need to merge years, then it is done through the years_per_step var
+        if self.years_per_step != 1:
+            self.year_mapping = self._get_year_batches()
+
         for idx, doc in enumerate(self.paras_processed):
             token = [w for s in doc for w in s if w in wcounts]
             type_counts = Counter(token)
@@ -150,7 +155,10 @@ class DTMCreator:
             if len(token)>15 and len(type_counts)>5: 
                 id_counts = [f"{len(type_counts)}"]+[f"{wids[k]}:{v}" for k,v in type_counts.most_common()]
                 self.paras_to_wordcounts.append(' '.join(id_counts))
-                self.years_final.append(self.rdates[idx])
+                if self.years_per_step != 1:
+                    self.years_final.append(self.year_mapping[self.rdates[idx]])
+                else:
+                    self.years_final.append(self.rdates[idx])
 
     def write_files(self, min_year=None, max_year=None):
         # write -mult file and -seq file
@@ -164,8 +172,12 @@ class DTMCreator:
 
         yearcount = defaultdict(lambda:0)
 
-        min_date = min_year if min_year else min(self.dates)
-        max_date = max_year if max_year else max(self.dates)
+        if self.years_per_step == 1:
+            min_date = min_year if min_year else min(self.dates)
+            max_date = max_year if max_year else max(self.dates)
+        else:
+            min_date = min(self.year_mapping.values())
+            max_date = max(self.year_mapping.values())
 
         for year in range(min_date, max_date, 1):
             for idx, yy in enumerate(self.years_final):
@@ -183,8 +195,8 @@ class DTMCreator:
         outmult.close()
         outseq.close()
     
-    def create(self):
-        self.preprocess_paras(write_vocab=True)
+    def create(self, min_freq=150):
+        self.preprocess_paras(min_freq=min_freq, write_vocab=True)
         self.write_files()
 
 def fit(run, model_root_dir):
@@ -278,7 +290,7 @@ if __name__ == "__main__":
     # model_root = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram")
     # # the path to the journal paragraphs that are to become part of the fitting data for the topic model.
     # data_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv")
-    # create_model_inputs("1000subset_coal", os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=1000)
+    # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
     fit_mult_model("dataset_20000subset_coal")

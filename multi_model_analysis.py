@@ -8,8 +8,10 @@ def analyse(coh, ds, model, coherences):
     if not os.path.isdir(analysis_save_dir):
         os.mkdir(analysis_save_dir)
     # plot the topic distributions over time for this model
+    print("plotting topics...")
     coh.plot_topics_ot(os.path.join(analysis_save_dir, f"{model}.png"))
     # get the coherence of this model
+    print("calculating coherence...")
     pmi_coh = coh.get_coherence()
     npmi_coh = coh.get_coherence("c_npmi")
     coherences[model] = {}
@@ -101,7 +103,9 @@ def hansard_analyse_multi_models():
                 model_out_dir=model,
                 eurovoc_whitelist=False
             )
+            print("initialising coherence...")
             coh.init_coherence()
+            print("done! analysing...")
             analyse(coh, ds, model, coherences)
 
 def validate_multi_models():
@@ -208,5 +212,5 @@ def validate_multi_models():
 if __name__ == "__main__":
     # greyroads_analyse_multi_models()
     # validate_multi_models()
-    # hansard_analyse_multi_models()
-    analyse_model()
+    hansard_analyse_multi_models()
+    # analyse_model()

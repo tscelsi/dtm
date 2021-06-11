@@ -24,7 +24,9 @@ class CoherenceAnalysis(TDMAnalysis):
             sys.exit(1)
 
     def init_coherence(self):
+        print("preprocessing paragraphs...")
         self.dc.preprocess_paras(write_vocab=False)
+        print("creating top words df...")
         self.top_words = self.create_top_words_df(n=20)
     
     def get_coherence(self, coherence='c_uci'):
