@@ -7,9 +7,11 @@
 
 import pandas as pd
 import os
+import sys
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import numpy as np
 import re
+import csv
 from collections import Counter, defaultdict
 import matplotlib.pylab as plt
 from pprint import pprint
@@ -18,7 +20,7 @@ from spacy.matcher import PhraseMatcher
 from spacy.tokens import Doc
 import spacy
 
-EUROVOC_PATH = os.path.join("eurovoc_export_en.csv")
+EUROVOC_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_export_en.csv")
 
 class TDMAnalysis:
 
@@ -310,7 +312,7 @@ class TDMAnalysis:
         return c
         
 
-    def get_auto_topic_name(self, top_words, i, top_n=4):
+    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True):
         auto_topic_suggestions = Counter()
         weighted_ev_topics = self.eurovoc_lookup_2(top_words)
         # for prob, w in top_words:
@@ -318,12 +320,18 @@ class TDMAnalysis:
         #     auto_topic_suggestions.update(weighted_topics_for_w)
         # print([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)])
         # str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i), 
-        return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
+        if stringify:
+            return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
+        else:
+            return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
-    def get_topic_names(self, auto=True, detailed=False):
+    def get_topic_names(self, auto=True, detailed=False, stringify=True):
         """
         
         """
+        if stringify == False and detailed == True:
+            print("Can't have detailed topic names without being stringified, check kwargs")
+            sys.exit(1)
         self._init_eurovoc(EUROVOC_PATH)
         topic_names = {} if detailed else []
         self.create_eurovoc_topic_term_map()
@@ -332,7 +340,7 @@ class TDMAnalysis:
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
             self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
             if auto:
-                curr_topic_name = self.get_auto_topic_name(top_words, i)
+                curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify)
             else:
                 curr_topic_name = str([x[1]+str(i) for x in top_words[:3]])
             if detailed:
@@ -472,7 +480,51 @@ class TDMAnalysis:
         sorted_selection = self.get_sorted_columns(df_scores)
         self.time_evolution_plot(df_scores[sorted_selection], save_path, scale=1.3)
         return
-        
+
+def compare_coherences(dataset_root, analysis_folder):
+    pmi_c = Counter()
+    npmi_c = Counter()
+    with open(os.path.join(dataset_root, analysis_folder, "coherences.txt"), "r") as fp:
+        reader = csv.reader(fp, delimiter="\t")
+        for i, row in enumerate(reader):
+            if i != 0:
+                topic_num = row[0].split("_")[2].split("topics")[1]
+                pmi = float(row[1])
+                npmi = float(row[2])
+                if topic_num in pmi_c:
+                    pmi_c[topic_num].append(pmi)
+                else:
+                    pmi_c[topic_num] = [pmi]
+                if topic_num in npmi_c:
+                    npmi_c[topic_num].append(npmi)
+                else:
+                    npmi_c[topic_num] = [npmi]
+    return pmi_c, npmi_c
+
+def compare_dataset_coherences():
+    datasets = [
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_steo_all_bigram"),
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all_bigram"),
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all_bigram"),
+        os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_coal_bigram"),
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram"),
+        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram")
+    ]
+    pmi = Counter()
+    npmi = Counter()
+    from statistics import median
+    for dataset in datasets:
+        pmi_c, npmi_c = compare_coherences(dataset, "analysis_all_eurovoc_topics")
+        pmi.update(pmi_c)
+        npmi.update(npmi_c)
+    for topic_num in pmi:
+        pmi_vals = pmi[topic_num]
+        npmi_vals = npmi[topic_num]
+        print(f"For models with {topic_num} topics\n\tAverage pmi is: {sum(pmi_vals)/len(pmi_vals)}\n\tMedian pmi is: {median(pmi_vals)}")
+        print(f"For models with {topic_num} topics\n\tAverage npmi is: {sum(npmi_vals)/len(npmi_vals)}\n\tMedian npmi is: {median(npmi_vals)}")
+        print("-----")
+    print("==========")
 
 if __name__ == "__main__":
     NDOCS = 19971 # number of lines in -mult.dat file.
@@ -488,6 +540,10 @@ if __name__ == "__main__":
         eurovoc_whitelist=False,
         )
     topic_names = tdma.get_topic_names(auto=True, detailed=False)
+    for i, tn in enumerate(topic_names):
+        print(tn)
+        print('----------')
+    # compare_dataset_coherences()
     # breakpoint()
     # df = tdma.create_top_words_df(n=20)
     # breakpoint()

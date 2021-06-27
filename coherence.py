@@ -25,13 +25,13 @@ class CoherenceAnalysis(TDMAnalysis):
         else:
             print("need to specify one of 'hansard|greyroads|journals' as type.")
             sys.exit(1)
-
-    def init_coherence(self, mult_path=None, vocab_path=None):
+        
+    def init_coherence(self, mult_path=None, vocab_path=None, **kwargs):
         if mult_path and vocab_path:
             self.paras_processed = DTMCreator.get_paras_from_mult_dat(mult_path, vocab_path)
         elif self.dc:
             print("preprocessing paragraphs...")
-            self.dc.preprocess_paras(write_vocab=False)
+            self.dc.preprocess_paras(write_vocab=False, **kwargs)
         else:
             print("init incorrect.")
             sys.exit(1)
