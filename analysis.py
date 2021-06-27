@@ -95,7 +95,7 @@ class TDMAnalysis:
         
         # load the doc-year mapping, which is just a list of length(number of documents) in the same order as
         # the -mult.dat file.
-        self.doc_year_mapping = open(self.doc_year_map_path, "r").read().splitlines()
+        self.doc_year_mapping = [int(x) for x in open(self.doc_year_map_path, "r").read().splitlines()]
         assert len(self.doc_year_mapping) == ndocs
 
         self.years = sorted(list(set(self.doc_year_mapping)))

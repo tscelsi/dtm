@@ -2,6 +2,7 @@ from analysis import TDMAnalysis
 from hansard_dtm_creator import HansardDTMCreator
 from greyroads_dtm_creator import GreyroadsDTMCreator
 from journals_dtm_creator import JournalDTMCreator
+from dtm_creator import DTMCreator
 from gensim.models.coherencemodel import CoherenceModel
 from gensim.corpora import Dictionary
 import os
@@ -19,13 +20,21 @@ class CoherenceAnalysis(TDMAnalysis):
             self.dc = GreyroadsDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
         elif _type == "journals":
             self.dc = JournalDTMCreator(model_root, data_path, text_col_name, date_col_name, bigram=bigram, limit=limit)
+        elif _type == "reverse":
+            self.dc = None
         else:
             print("need to specify one of 'hansard|greyroads|journals' as type.")
             sys.exit(1)
 
-    def init_coherence(self):
-        print("preprocessing paragraphs...")
-        self.dc.preprocess_paras(write_vocab=False)
+    def init_coherence(self, mult_path=None, vocab_path=None):
+        if mult_path and vocab_path:
+            self.paras_processed = DTMCreator.get_paras_from_mult_dat(mult_path, vocab_path)
+        elif self.dc:
+            print("preprocessing paragraphs...")
+            self.dc.preprocess_paras(write_vocab=False)
+        else:
+            print("init incorrect.")
+            sys.exit(1)
         print("creating top words df...")
         self.top_words = self.create_top_words_df(n=20)
     
@@ -39,7 +48,8 @@ class CoherenceAnalysis(TDMAnalysis):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=20, with_prob=False)
             topics.append(top_words)
-        for para in self.dc.paras_processed:
+        iterator = self.dc.paras_processed if self.dc else self.paras_processed
+        for para in iterator:
             merged_para = []
             for sent in para:
                 merged_para.extend(sent)
