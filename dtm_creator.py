@@ -19,7 +19,10 @@ SEED = 42
 
 class DTMCreator:
     def __init__(self, model_root, csv_path, text_col_name='section_txt', date_col_name='date', bigram=True, limit=None, years_per_step=1):
-        self.df = pd.read_csv(csv_path)
+        if csv_path.endswith(".tsv"):
+            self.df = pd.read_csv(csv_path, sep="\t")
+        else:
+            self.df = pd.read_csv(csv_path)
         self.df = self.df.dropna(subset=[text_col_name])
         self.paragraphs = self.df[text_col_name].tolist()
         self.dates = self._extract_dates(date_col_name)
@@ -46,6 +49,17 @@ class DTMCreator:
             self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes], n_process=11, batch_size=256)
             self.rdates = [self.dates[i] for i in rand_indexes]
         return
+
+    @classmethod
+    def get_paras_from_mult_dat(self, mult_path, vocab_path):
+        vocab = [x.split("\t")[0] for x in open(vocab_path, "r").readlines()]
+        paras = []
+        for line in open(mult_path, "r").readlines():
+            para = []
+            for index, count in [x.split(":") for x in line.split(" ")[1:]]:
+                para.append([vocab[int(index)].strip() for _ in range(int(count))])
+            paras.append(para)
+        return paras
 
     def _extract_dates(self, date_col_name):
         """Here we extract the dates for each document by taking a particular column of the dataframe containing the corpus
@@ -79,12 +93,27 @@ class DTMCreator:
                 new_paras.append(para.text)
         self.rdocs = self.nlp.pipe(new_paras, n_process=11, batch_size=256)
 
-    def _get_year_batches(self):
+    def _get_year_batches(self, years_list=None):
+        years = years_list if years_list else self.rdates
         year_mapping = {}
-        for date in self.rdates:
-            batch_num = int((date - min(self.rdates)) / self.years_per_step)
-            year_mapping[date] = batch_num
+        for year in years:
+            batch_num = int((year - min(years)) / self.years_per_step)
+            year_mapping[year] = batch_num
         return year_mapping
+
+    def batch_years(self, years_list=None, return_mapping=False):
+        """
+        This function takes an already created DTM input sequence of years
+        and gives back the same years batched into spans of years based on the _get_year_batches
+        function.
+        """
+        years = years_list if years_list else self.rdates
+        year_mapping = self._get_year_batches(years)
+        new_years_list = [year_mapping[year] for year in years]
+        if return_mapping:
+            return new_years_list, year_mapping
+        else:
+            return new_years_list
 
     def preprocess_paras(self, min_freq=150, write_vocab=False):
         if self.bigram:
@@ -179,7 +208,7 @@ class DTMCreator:
             min_date = min(self.year_mapping.values())
             max_date = max(self.year_mapping.values())
 
-        for year in range(min_date, max_date, 1):
+        for year in range(min_date, max_date + 1, 1):
             for idx, yy in enumerate(self.years_final):
                 if year ==yy:
                     yearcount[year]+=1
@@ -293,6 +322,9 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model("dataset_20000subset_coal")
+    # fit_mult_model("dataset_tom_test")
+    fit({"alpha": 0.01,
+        "topic_var": 0.001,
+    "topics": 30}, "dataset_lea_test")
 
     # pid 7380

@@ -75,11 +75,10 @@ def analyse_model():
 def hansard_analyse_multi_models():
     datasets = [
         {
-            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_20000subset_coal"),
-            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_full_downloaded.csv"),
-            "ndocs": 18781,
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_lea_test"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "final_1000_40000_lea_0906.tsv"),
+            "ndocs": 6198,
             "bigram": False,
-            "limit": 20000
         },
     ]
     for ds in datasets:
@@ -88,10 +87,10 @@ def hansard_analyse_multi_models():
         coherences = {}
         for model in df_models:
             coh = CoherenceAnalysis(
-                ds['data_path'],
-                "hansard",
-                "main_text",
-                "date",
+                None,
+                "reverse",
+                None,
+                None,
                 ds['bigram'],
                 ds.get("limit"),
                 ds['ndocs'], 
@@ -104,7 +103,7 @@ def hansard_analyse_multi_models():
                 eurovoc_whitelist=False
             )
             print("initialising coherence...")
-            coh.init_coherence()
+            coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
             print("done! analysing...")
             analyse(coh, ds, model, coherences)
 
