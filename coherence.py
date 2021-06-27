@@ -23,8 +23,10 @@ class CoherenceAnalysis(TDMAnalysis):
             print("need to specify one of 'hansard|greyroads|journals' as type.")
             sys.exit(1)
 
-    def init_coherence(self):
-        self.dc.preprocess_paras(write_vocab=False)
+    def init_coherence(self, **kwargs):
+        print("preprocessing paragraphs...")
+        self.dc.preprocess_paras(write_vocab=False, **kwargs)
+        print("creating top words df...")
         self.top_words = self.create_top_words_df(n=20)
     
     def get_coherence(self, coherence='c_uci'):
