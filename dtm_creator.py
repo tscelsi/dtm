@@ -12,8 +12,8 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 
-# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+# bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
 SEED = 42
 
 
@@ -26,7 +26,8 @@ class DTMCreator:
         date_col_name='date', 
         bigram=True, 
         limit=None, 
-        years_per_step=1
+        years_per_step=1,
+        shuffle=True
     ):
         if csv_path.endswith(".tsv"):
             self.df = pd.read_csv(csv_path, sep="\t")
@@ -50,7 +51,7 @@ class DTMCreator:
         self.nlp.add_pipe('sentencizer')
         self.rdocs =[]
         self.rdates = []
-        rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))]
+        rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))] if shuffle else range(len(self.paragraphs))
         if limit:
             self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes[:limit]], n_process=11, batch_size=256)
             self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
