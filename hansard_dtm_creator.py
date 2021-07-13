@@ -5,7 +5,7 @@ Email: tscelsi@student.unimelb.edu.au
 File that creates a DTM-compatible dataset for the 'hansard' dataset.
 """
 
-from dtm_creator import DTMCreator
+from .dtm_creator import DTMCreator
 from collections import defaultdict
 import os
 import pandas as pd
