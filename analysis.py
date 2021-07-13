@@ -294,7 +294,7 @@ class TDMAnalysis:
                 c[ev_topic] += prob
         return c
     
-    def eurovoc_lookup_2(self, top_words):
+    def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
         c = Counter()
         top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
         for topic in self.eurovoc_topics:
@@ -307,14 +307,17 @@ class TDMAnalysis:
                 term_ind = self.raw_term_list.index(term)
                 tfidf = self.tfidf_mat[term_ind][topic_ind]
                 # weighting and tf-idf 
-                score = score + (weight * tfidf)
+                if tfidf_enabled:
+                    score = score + (weight * tfidf)
+                else:
+                    score = score + weight
             c.update({topic: score})
         return c
         
 
-    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True):
+    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False):
         auto_topic_suggestions = Counter()
-        weighted_ev_topics = self.eurovoc_lookup_2(top_words)
+        weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
         # for prob, w in top_words:
         #     weighted_topics_for_w = self.eurovoc_lookup(w, prob)
         #     auto_topic_suggestions.update(weighted_topics_for_w)
@@ -322,10 +325,12 @@ class TDMAnalysis:
         # str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i), 
         if stringify:
             return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
+        elif return_raw_scores:
+            return weighted_ev_topics
         else:
             return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
-    def get_topic_names(self, auto=True, detailed=False, stringify=True):
+    def get_topic_names(self, auto=True, detailed=False, stringify=True, tfidf_enabled=True):
         """
         
         """
@@ -340,13 +345,14 @@ class TDMAnalysis:
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
             self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
             if auto:
-                curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify)
+                curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled)
             else:
                 curr_topic_name = str([x[1]+str(i) for x in top_words[:3]])
             if detailed:
                 topic_names[curr_topic_name] = top_words
             else:
                 topic_names.append(curr_topic_name)
+        self.topic_names = topic_names
         return topic_names
     
     def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True):
@@ -539,18 +545,19 @@ if __name__ == "__main__":
         model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
         eurovoc_whitelist=False,
         )
-    topic_names = tdma.get_topic_names(auto=True, detailed=False)
-    for i, tn in enumerate(topic_names):
-        print(tn)
-        print('----------')
+    # topic_names = tdma.get_topic_names(auto=True, detailed=False)
+    # for i, tn in enumerate(topic_names):
+    #     print(tn)
+    #     print('----------')
     # compare_dataset_coherences()
     # breakpoint()
     # df = tdma.create_top_words_df(n=20)
     # breakpoint()
-    # for i in range(10):
-    #     word_dist_arr_ot = tdma.get_topic_word_distributions_ot(i)
-    #     top_words = tdma.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=True)
-    #     break
+    for i in range(10):
+        word_dist_arr_ot = tdma.get_topic_word_distributions_ot(i)
+        breakpoint()
+        # top_words = tdma.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=True)
+        
         # print(top_words)
     # df = tdma.create_topic_proportions_per_year_df(merge_topics=True)
     # breakpoint()
