@@ -85,7 +85,9 @@ class TDMAnalysis:
         self.gam_path = os.path.join(self.model_root, self.model_out_dir, "lda-seq", "gam.dat")
         self.doc_year_map_path = os.path.join(self.model_root, doc_year_map_file_name)
         self.seq_dat = os.path.join(self.model_root, seq_dat_file_name)
-
+        self.eurovoc = None
+        self.eurovoc_topics = None
+        self.eurovoc_topic_indices = None
         self.topic_prefix = "topic-"
         self.topic_suffix = "-var-e-log-prob.dat"
         vocab_file = os.path.join(self.model_root, vocab_file_name)
@@ -211,6 +213,7 @@ class TDMAnalysis:
             c_doc = Doc.from_docs(curr_topic_list, ensure_whitespace=True)
             self.eurovoc_topic_docs[topic] = c_doc
         self.eurovoc_topics = np.array(list(self.eurovoc_topic_docs.keys()))
+        self.eurovoc_topic_indices = sorted(self.eurovoc_topics)
         print("finished.")
 
     def get_topic_tfidf_scores(self, top_terms, tfidf_enabled=False):
@@ -330,6 +333,60 @@ class TDMAnalysis:
         else:
             return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
+    def _get_baseline_topic_vectors(self, simple=True, threshold=0):
+        """
+        This function returns random scores normalised with a standard scaler. _init_eurovoc needs to run before this function.
+        """
+        topic_vectors = []
+        topic_indices = sorted(self.eurovoc_topics)
+        for i in range(self.ntopics):
+            word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
+            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
+            self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
+            model_ev_scores = self.get_auto_topic_name(top_words, i, stringify=False, tfidf_enabled=False, return_raw_scores=True)
+            topic_vectors.append([model_ev_scores[i] for i in topic_indices])
+        rng = np.random.default_rng()
+        baseline_topic_vectors = np.array(topic_vectors)
+        if simple:
+            # we want to shuffle everything
+            for vec in baseline_topic_vectors:
+                rng.shuffle(vec)
+        else:
+            # we want to only shuffle elements that have score above threshold
+            for topic in baseline_topic_vectors:
+                above_thresh_scores = []
+                for score in topic:
+                    if score > threshold:
+                        above_thresh_scores.append(score)
+                rng.shuffle(above_thresh_scores)
+                i = 0
+                for j, score in enumerate(topic):
+                    if score > threshold:
+                        topic[j] = above_thresh_scores[i]
+                        i += 1
+        assert round(sum(topic_vectors[0]),4) == round(baseline_topic_vectors.sum(axis=1)[0],4)
+        return baseline_topic_vectors
+
+    def generate_baselines(self, **kwargs):
+        simple_baseline = self._get_baseline_topic_vectors(simple=True, **kwargs)
+        intelligent_baseline = self._get_baseline_topic_vectors(simple=False, **kwargs)
+        return simple_baseline, intelligent_baseline
+
+    def get_baseline_vec_topic_names(self, vec, top_n=4):
+        """
+        This function generates the topic names for a baseline vector which represents the scores
+        of each of the EuroVoc topics for a particular DTM topic k. That is, how relevant each EuroVoc
+        topic is to k. EuroVoc needs to be initialised for this to function correctly.
+        """
+        if not self.eurovoc_topic_indices:
+            print("need to init eurovoc before calling this function by _init_eurovoc")
+            sys.exit(1)
+        all_ev_topics = []
+        for dtm_topic in vec:
+            ev_topics = [(self.eurovoc_topic_indices[x], round(dtm_topic[x],2)) for x in np.argsort(dtm_topic)[::-1]][:top_n]
+            all_ev_topics.append(ev_topics)
+        return all_ev_topics
+
     def get_topic_names(self, auto=True, detailed=False, stringify=True, tfidf_enabled=True):
         """
         
@@ -355,6 +412,16 @@ class TDMAnalysis:
         self.topic_names = topic_names
         return topic_names
     
+    def get_top_words(self, **kwargs):
+        """
+        Gets the top words for each topic within the DTM model being analysed.
+        """
+        self.top_word_arr = []
+        for i in range(self.ntopics):
+            word_dist_arr = self.get_topic_word_distributions_ot(i)
+            self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, **kwargs))
+        return self.top_word_arr
+
     def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True):
         """
         This function takes in an NUM_YEARSxLEN_VOCAB array/matrix that
@@ -372,7 +439,7 @@ class TDMAnalysis:
             Whether to return the word probabilities in ascending or descending
             order. i.e ascending=lowest probability at index 0 and vice-versa.
 
-        tuples (bool): Whether to return just the word text, or a tuple of word
+        with_prob (bool): Whether to return just the word text, or a tuple of word
         text and the word's total probability summed over all time spans
 
         Returns: Either a list of strings or a list of tuples (float, string)

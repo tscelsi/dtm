@@ -13,6 +13,8 @@ def heatmap(X, save_path=None, **kwargs):
     palette = sns.color_palette("viridis", as_cmap=True)
     sns.heatmap(data=X, center=0, cmap=palette, **kwargs)
     if save_path:
+        print("saving heatmap...")
         plt.savefig(save_path)
     else:
+        print("showing heatmap...")
         plt.show()
