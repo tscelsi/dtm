@@ -78,7 +78,7 @@ class DTMCreator:
         In this case, the df has a column labelled 'date' which contains a date of form 2020-10-09. 
         We extract the year (2020) for each doc in the df.
 
-        An simple example function could be:
+        A simple example function could be:
             return [int(d.split("-")[0]) for d in self.df[date_col_name].tolist()]
 
         MAKE GENERAL
