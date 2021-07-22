@@ -162,6 +162,8 @@ class AcrossModelAnalysis:
 
     def _run_matcher(self, threshold_distance=-1):
         """
+        DEPRECATED, but may be still useful
+
         This function simply runs a matching algorithm between the common vocabulary topics of model1
         and model2. It iterates through model1 and for each topic, finds it's most closely related topic
         by cosine similarity.
@@ -185,36 +187,6 @@ class AcrossModelAnalysis:
             else:
                 matches.append((topic1_ind, None))
         return matches
-
-    def _run_cluster_optimisation(self, X):
-        best_cluster_n = None
-        best_silhouette_avg = None
-        for i in range(5, self.m1.ntopics):
-            clusterer = KMeans(n_clusters=i, random_state=10)
-            cluster_labels = clusterer.fit_predict(X)
-            silhouette_avg = silhouette_score(X, cluster_labels)
-            print("For n_clusters =", i, "The average silhouette_score is :", silhouette_avg)
-            if not best_silhouette_avg:
-                best_silhouette_avg = silhouette_avg
-                best_cluster_n = i
-            elif silhouette_avg > best_silhouette_avg:
-                best_silhouette_avg = silhouette_avg
-                best_cluster_n = i
-        return best_cluster_n
-
-    def run_clustering(self):
-        """
-        Here we run kmeans on the now same shape topic vocab distributions. This function only can run once 
-        _update_model_distributions_to_common_vocab function has run and the common topic distributions have been created.
-
-        It returns a list of cluster labels for the concatenated m1 and m2 topic distributions. i.e. if m1 has 10 topics and m2 has 30 topics, 
-        then it will return a list of length 40, where the first ten labels represent the clusters of the m1 topics and the last 30 the m2 topics.
-        """ 
-        X = np.concatenate((self.m1_common, self.m2_common), axis=0)
-        n_clusters = self._run_cluster_optimisation(X)
-        clusterer = KMeans(n_clusters=n_clusters)
-        labels = clusterer.fit_predict(X)
-        return labels[:self.m1.ntopics], labels[self.m1.ntopics:self.m2.ntopics + self.m1.ntopics]
     
     def _get_eurovoc_topic_vectors(self, model, tfidf_enabled=True, scale=True):
         if type(model.eurovoc) != pd.DataFrame:
@@ -238,7 +210,7 @@ class AcrossModelAnalysis:
     def evaluate_eurovoc_labels(self):
         # accrue all relevant vector representations of DTM topics
         m1_tfidf_vec, m1_tfidf_ind = self._get_eurovoc_topic_vectors(self.m1, scale=False)
-        m1_simple_vec, m1_simple_ind = self._get_eurovoc_topic_vectors(self.m1, tfidf_enabled=False, scale=False)    
+        m1_simple_vec, m1_simple_ind = self._get_eurovoc_topic_vectors(self.m1, tfidf_enabled=False, scale=False)
         m1_simple_baseline, m1_intell_baseline = self.m1.generate_baselines()
         m2_tfidf_vec, m2_tfidf_ind = self._get_eurovoc_topic_vectors(self.m2)
         m2_simple_vec, m2_simple_ind = self._get_eurovoc_topic_vectors(self.m2, tfidf_enabled=False)
