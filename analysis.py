@@ -74,7 +74,8 @@ class TDMAnalysis:
         seq_dat_file_name="eiatfidf-seq.dat", 
         vocab_file_name="vocab_tfidf.txt",
         model_out_dir="model_run",
-        eurovoc_whitelist=True
+        eurovoc_whitelist=True,
+        **kwargs
         ):
         self.nlp = spacy.load("en_core_web_sm")
         self.ndocs = ndocs
@@ -333,12 +334,12 @@ class TDMAnalysis:
         else:
             return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
-    def _get_baseline_topic_vectors(self, simple=True, threshold=0):
+    def _get_baseline_topic_vectors(self, simple=True, zeroed=False, indices=None):
         """
         This function returns random scores normalised with a standard scaler. _init_eurovoc needs to run before this function.
         """
         topic_vectors = []
-        topic_indices = sorted(self.eurovoc_topics)
+        topic_indices = indices if indices else sorted(self.eurovoc_topics)
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
@@ -350,27 +351,57 @@ class TDMAnalysis:
         if simple:
             # we want to shuffle everything
             for vec in baseline_topic_vectors:
+                # print(f"before: {vec}")
                 rng.shuffle(vec)
+                # print(f"after: {vec}")
+                # print("-----")
+            return baseline_topic_vectors
         else:
+            print("INTELLIGENT BASELINE")
             # we want to only shuffle elements that have score above threshold
+            # shuffle top 5/10 with highest score
+            threshold = np.quantile(baseline_topic_vectors, 0.7)
+            threshold_matrix = []
+            top_ten_matrix = []
             for topic in baseline_topic_vectors:
+                # get top 10 score indices
+                top_ten_indices = np.argsort(topic)[::-1][:10]
+                top_ten_indices_shuffled = np.copy(top_ten_indices)
+                rng.shuffle(top_ten_indices_shuffled)
                 above_thresh_scores = []
                 for score in topic:
                     if score > threshold:
                         above_thresh_scores.append(score)
                 rng.shuffle(above_thresh_scores)
+                if zeroed:
+                    top_ten = np.zeros(shape=topic.shape)
+                else:    
+                    top_ten = np.copy(topic)
+                for i in range(len(top_ten_indices)):
+                    top_ten[top_ten_indices[i]] = topic[top_ten_indices_shuffled[i]] 
                 i = 0
-                for j, score in enumerate(topic):
+                # print(f"before: {topic}")
+                threshold_vector = []
+                for score in topic:
                     if score > threshold:
-                        topic[j] = above_thresh_scores[i]
+                        threshold_vector.append(above_thresh_scores[i])
                         i += 1
-        assert round(sum(topic_vectors[0]),4) == round(baseline_topic_vectors.sum(axis=1)[0],4)
-        return baseline_topic_vectors
+                    else:
+                        if zeroed:
+                            threshold_vector.append(0)
+                        else:
+                            threshold_vector.append(score)
+                threshold_matrix.append(threshold_vector)
+                top_ten_matrix.append(top_ten)
+                # print(f"after: {np.array(new_arr)}")
+                # print("-----")
+            return np.array(threshold_matrix), np.array(top_ten_matrix)
 
     def generate_baselines(self, **kwargs):
         simple_baseline = self._get_baseline_topic_vectors(simple=True, **kwargs)
-        intelligent_baseline = self._get_baseline_topic_vectors(simple=False, **kwargs)
-        return simple_baseline, intelligent_baseline
+        threshold_baseline, top_ten_baseline = self._get_baseline_topic_vectors(simple=False, **kwargs)
+        threshold_baseline_zeroed, top_ten_baseline_zeroed = self._get_baseline_topic_vectors(simple=False, zeroed=True, **kwargs)
+        return simple_baseline, threshold_baseline, top_ten_baseline, threshold_baseline_zeroed, top_ten_baseline_zeroed
 
     def get_baseline_vec_topic_names(self, vec, top_n=4):
         """
@@ -397,9 +428,12 @@ class TDMAnalysis:
         self._init_eurovoc(EUROVOC_PATH)
         topic_names = {} if detailed else []
         self.create_eurovoc_topic_term_map()
+        self.top_word_arr = []
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
+            # add top words to class object
+            self.top_word_arr.append(top_words)
             self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
             if auto:
                 curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled)
@@ -612,6 +646,7 @@ if __name__ == "__main__":
         model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
         eurovoc_whitelist=False,
         )
+    res = tdma._get_baseline_topic_vectors(simple=False)
     # topic_names = tdma.get_topic_names(auto=True, detailed=False)
     # for i, tn in enumerate(topic_names):
     #     print(tn)
@@ -619,10 +654,11 @@ if __name__ == "__main__":
     # compare_dataset_coherences()
     # breakpoint()
     # df = tdma.create_top_words_df(n=20)
-    # breakpoint()
-    for i in range(10):
-        word_dist_arr_ot = tdma.get_topic_word_distributions_ot(i)
-        breakpoint()
+    breakpoint()
+    print("hey")
+    # for i in range(10):
+    #     word_dist_arr_ot = tdma.get_topic_word_distributions_ot(i)
+    #     breakpoint()
         # top_words = tdma.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=True)
         
         # print(top_words)
