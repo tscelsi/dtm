@@ -156,7 +156,7 @@ class TDMAnalysis:
         self.eurovoc = self.eurovoc.set_index('index')
         # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
 
-    def create_topic_proportions_per_year_df(self, remove_small_topics, threshold, merge_topics=False):
+    def create_topic_proportions_per_year_df(self, remove_small_topics, threshold, merge_topics=False, include_names=False):
         """
         This function creates a dataframe which eventually will be used for
         plotting topic proportions over time. Similar to the visualisations used
@@ -187,7 +187,10 @@ class TDMAnalysis:
                     for_df.append([year, topic_idx, proportion, topic_name])
             else:
                 for topic_idx, topic in enumerate(topic_props):
-                    for_df.append([year, topic_idx, topic, str(topic_names[topic_idx])])
+                    if include_names:
+                        for_df.append([year, topic_idx, topic, str(topic_names[topic_idx])])
+                    else:
+                        for_df.append([year, topic_idx, topic, str(topic_idx)])
         topic_proportions_df = pd.DataFrame(for_df, columns=["year", "topic", "proportion", "topic_name"])
         if remove_small_topics:
             m = topic_proportions_df.groupby('topic')['proportion'].mean().apply(lambda x: x > threshold)
@@ -196,8 +199,8 @@ class TDMAnalysis:
         # topic_proportions_df = pd.DataFrame(zip(self.years, topic_proportions_per_year), columns=["year", "topic", "proportion", "topic_name"])
         return topic_proportions_df
 
-    def create_plottable_topic_proportion_ot_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False):
-        df = self.create_topic_proportions_per_year_df(remove_small_topics, threshold, merge_topics=merge_topics)
+    def create_plottable_topic_proportion_ot_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False):
+        df = self.create_topic_proportions_per_year_df(remove_small_topics, threshold, merge_topics=merge_topics, include_names=include_names)
         df = df.pivot(index='year', columns='topic_name', values='proportion')
         return df
 
@@ -580,8 +583,8 @@ class TDMAnalysis:
         sel2 = sel2.drop('peak_pos')
         return sel2.columns
     
-    def plot_topics_ot(self, save_path):
-        df_scores = self.create_plottable_topic_proportion_ot_df()
+    def plot_topics_ot(self, save_path, include_names=False):
+        df_scores = self.create_plottable_topic_proportion_ot_df(include_names=include_names)
         for i in df_scores.index:
             df_scores.loc[i] = df_scores.loc[i] / df_scores.loc[i].sum() * 100
         sorted_selection = self.get_sorted_columns(df_scores)
@@ -634,33 +637,16 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 19971 # number of lines in -mult.dat file.
+    NDOCS = 3800 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
-        doc_year_map_file_name="eiajournal-year.dat",
-        seq_dat_file_name="eiajournal-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_labor_bigram"),
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
+        model_out_dir="k30_a0.01_var0.05",
         eurovoc_whitelist=False,
         )
     res = tdma._get_baseline_topic_vectors(simple=False)
-    # topic_names = tdma.get_topic_names(auto=True, detailed=False)
-    # for i, tn in enumerate(topic_names):
-    #     print(tn)
-    #     print('----------')
-    # compare_dataset_coherences()
-    # breakpoint()
-    # df = tdma.create_top_words_df(n=20)
-    breakpoint()
-    print("hey")
-    # for i in range(10):
-    #     word_dist_arr_ot = tdma.get_topic_word_distributions_ot(i)
-    #     breakpoint()
-        # top_words = tdma.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=True)
-        
-        # print(top_words)
-    # df = tdma.create_topic_proportions_per_year_df(merge_topics=True)
-    # breakpoint()

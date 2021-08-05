@@ -109,10 +109,13 @@ class AcrossModelAnalysis:
         self._update_model_distributions_to_common_vocab()
 
     def _get_models_n_topics(self, m1, m2):
-        return (
-            int(m1['model_out_dir'].split("_")[2].split("topics")[1]),
-            int(m2['model_out_dir'].split("_")[2].split("topics")[1])
-        )
+        try:
+            m1_topics = int(m1['model_out_dir'].split("_")[2].split("topics")[1])
+            m2_topics = int(m2['model_out_dir'].split("_")[2].split("topics")[1])
+        except Exception:
+            m1_topics = int(m1['model_out_dir'].split("_")[0].split("k")[1])
+            m2_topics = int(m2['model_out_dir'].split("_")[0].split("k")[1])
+        return m1_topics, m2_topics
 
     def _get_models_n_docs(self, m1, m2):
         return (
@@ -502,62 +505,18 @@ def test():
 
 if __name__ == "__main__":
     m1 = {
-        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all_bigram"),
-        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
-        "doc_year_map_file_name": "greyroads-year.dat",
-        "seq_dat_file_name": "greyroads-seq.dat",
+        "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_labor_bigram"),
+        "model_out_dir": "k30_a0.01_var0.05", 
+        "doc_year_map_file_name": "model-year.dat",
+        "seq_dat_file_name": "model-seq.dat",
         "vocab_file_name": "vocab.txt",
         "eurovoc_whitelist": False
     }
     m2 = {
-        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
-        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
-        "doc_year_map_file_name": "eiajournal-year.dat",
-        "seq_dat_file_name": "eiajournal-seq.dat",
+        "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_not_labor_bigram"),
+        "model_out_dir": "k30_a0.01_var0.05", 
+        "doc_year_map_file_name": "model-year.dat",
+        "seq_dat_file_name": "model-seq.dat",
         "vocab_file_name": "vocab.txt",
         "eurovoc_whitelist": False
     }
-    # m2 = {
-    #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all_bigram"),
-    #     "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
-    #     "doc_year_map_file_name": "greyroads-year.dat",
-    #     "seq_dat_file_name": "greyroads-seq.dat",
-    #     "vocab_file_name": "vocab.txt",
-    #     "eurovoc_whitelist": False
-    # }
-    # ama = AcrossModelAnalysis(m1, m2, m1_alias="IEO", m2_alias="Journals")
-    # ama.m1._init_eurovoc(EUROVOC_PATH)
-    # ama.m1.create_eurovoc_topic_term_map()
-    # ama.m1.generate_baselines()
-    # breakpoint()
-    # ama.get_unique_topics(threshold=0.1)
-    # res = ama._get_similarity()
-    # print(res[0][29])
-    # print(res[29][0])
-    # breakpoint()
-    compare_all_models()
-
-    # ama.get_similar_topics(gt=False, threshold=-0.2, n=20)
-    # ama.get_heatmap(save_path="journals_v_aeo_heatmap.png", m1_title="Journals Topics", m2_title="AEO Topics")
-    # res = ama.run_clustering()
-    # ama.compare_topic_labels()
-    # ama.evaluate_eurovoc_labels()
-    # ama.m1.get_topic_names()
-    # ama.m2.get_topic_names()
-    # breakpoint()
-    # ama.evaluate_eurovoc_labels()
-
-    # m1_top_words = []
-    # m2_top_words = []
-    # for i in range(30):
-    #     word_dist_arr_ot = ama.m1.get_topic_word_distributions_ot(i)
-    #     top_words = ama.m1.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=False)
-    #     m1_top_words.append(top_words)
-    # for i in range(30):
-    #     word_dist_arr_ot = ama.m2.get_topic_word_distributions_ot(i)
-    #     top_words = ama.m2.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=False)
-    #     m2_top_words.append(top_words)
-    # for m1_topic, m2_topic in res:
-    #     print("==========")
-    #     print(f"m1 topic: {m1_top_words[m1_topic]}")
-    #     print(f"m2 topic: {m2_top_words[m2_topic]}")

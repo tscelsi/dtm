@@ -11,6 +11,7 @@ from spacy.matcher import PhraseMatcher
 from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
+from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
 
 bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
 # bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
@@ -53,10 +54,10 @@ class DTMCreator:
         self.rdates = []
         rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))] if shuffle else range(len(self.paragraphs))
         if limit:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes[:limit]], n_process=11, batch_size=256)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=256)
             self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
         else:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i] for i in rand_indexes], n_process=11, batch_size=256)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=256)
             self.rdates = [self.dates[i] for i in rand_indexes]
         return
 
@@ -124,6 +125,28 @@ class DTMCreator:
             return new_years_list, year_mapping
         else:
             return new_years_list
+
+    def _add_bigrams2(self, n=None):
+        """
+        Occurs after preprocess_paras runs
+        """
+        if n == None:
+            # default is bi/trigram has to appear on in half of docs on avg.
+            n = len(self.paras_processed) / 20
+        bigram_measures = BigramAssocMeasures()
+        trigram_measures = TrigramAssocMeasures()
+        docs = []
+        for para in self.paras_processed:
+            for sent in para:
+                docs.append(sent)
+        bigram_finder = BigramCollocationFinder.from_documents(docs)
+        trigram_finder = TrigramCollocationFinder.from_documents(docs)
+        bigram_finder.apply_freq_filter(n)
+        trigram_finder.apply_freq_filter(n)
+        trigrams = trigram_finder.score_ngrams(trigram_measures.pmi)
+        bigrams = bigram_finder.score_ngrams(bigram_measures.pmi)
+
+        breakpoint()
 
     def preprocess_paras(
             self, 
@@ -193,7 +216,6 @@ class DTMCreator:
         # if we need to merge years, then it is done through the years_per_step var
         if self.years_per_step != 1:
             self.year_mapping = self._get_year_batches()
-
         for idx, doc in enumerate(self.paras_processed):
             token = [w for s in doc for w in s if w in self.wcounts]
             type_counts = Counter(token)
@@ -307,15 +329,16 @@ class DTMCreator:
 
 
     
-    def create(self, min_freq=150, ds_upper_limit=1000):
-        self.preprocess_paras(min_freq=min_freq, write_vocab=True, ds_upper_limit=ds_upper_limit)
+    def create(self, min_freq=150, ds_lower_limit=1000):
+        self.preprocess_paras(min_freq=min_freq, write_vocab=True, ds_lower_limit=ds_lower_limit)
         self.write_dtm()
 
 def fit(run, model_root_dir, outpath):
     print(outpath)
     if not os.path.isdir(outpath):
+        print("making dir")
         os.mkdir(outpath)
-    cmd = os.path.join(os.environ['DTM_ROOT'], "dtm", "dtm", "main") + f" --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix={os.path.join(os.environ['DTM_ROOT'], 'dtm', model_root_dir, 'model')}   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10"
+    cmd = os.path.join(os.environ['DTM_ROOT'], "dtm", "dtm", "main") + f" --ntopics={run['topics']}   --mode=fit   --rng_seed=0   --initialize_lda=true   --corpus_prefix={os.path.join(model_root_dir, 'model')}   --outname={outpath}   --top_chain_var={run['topic_var']}   --alpha={run['alpha']}   --lda_sequence_min_iter=6   --lda_sequence_max_iter=20   --lda_max_em_iter=10"
     print(cmd)
     os.system(cmd)
     return 1
@@ -323,11 +346,10 @@ def fit(run, model_root_dir, outpath):
 def fit_mult_model(model_root_dir):
     with open("runs.json", "r") as fp:
         data = json.load(fp)
-    with Pool(processes=11) as pool:
-        multiple_results = [pool.apply_async(fit, (run, model_root_dir, ))for run in data]
-    print("here")
-    for res in multiple_results:
-        print(res.get())
+    with Pool(processes=12) as pool:
+        multiple_results = [pool.apply_async(fit, (run, model_root_dir, os.path.join(model_root_dir, f"k{run['topics']}_a{run['alpha']}_var{run['topic_var']}"))) for run in data]
+        for res in multiple_results:
+            print(res.get())
     return 1
 
 # def create_mult_datasets():
@@ -399,9 +421,9 @@ def fit_mult_model(model_root_dir):
 def fit_one():
     run = {"alpha": 0.01,
         "topic_var": 0.05,
-    "topics": 15}
-    model_root_dir = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500_upsampled_200")
-    outpath = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
+    "topics": 30}
+    model_root_dir = os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a")
+    outpath = os.path.join(model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
     fit(run, model_root_dir=model_root_dir, outpath=outpath)
 
 if __name__ == "__main__":
@@ -412,6 +434,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_one()
-
-    # pid 7380
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_labor_bigram"))
+    # fit_one()
