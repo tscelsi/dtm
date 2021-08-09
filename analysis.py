@@ -12,6 +12,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import numpy as np
 import re
 import csv
+import pickle
+from sklearn.metrics.pairwise import cosine_similarity
+import gensim
+import gensim.downloader
 from collections import Counter, defaultdict
 import matplotlib.pylab as plt
 from pprint import pprint
@@ -89,6 +93,7 @@ class TDMAnalysis:
         self.eurovoc = None
         self.eurovoc_topics = None
         self.eurovoc_topic_indices = None
+        self.embeddings = None
         self.topic_prefix = "topic-"
         self.topic_suffix = "-var-e-log-prob.dat"
         vocab_file = os.path.join(self.model_root, vocab_file_name)
@@ -146,6 +151,55 @@ class TDMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
+    def _create_eurovoc_embedding_matrix(self, save=True):
+        self.topic_term_map = {}
+        self.embedding_matrix = []
+        for topic in self.eurovoc_topics:
+            mask = self.eurovoc['MT'].apply(lambda x: x.lower()) == topic
+            terms = self.nlp.pipe([x.lower() for x in self.eurovoc[mask]['TERMS (PT-NPT)']], n_process=11)
+            term_vec_matrix = []
+            term_list = []
+            for term in terms:
+                toks = [x.lemma_ for x in term]
+                vec = self._get_vector_from_tokens(toks)
+                # take average of vectors to achieve embedding for term
+                if vec:
+                    term_vec_matrix.append(vec)
+                    term_list.append(term.text)
+            self.topic_term_map[topic] = term_list
+            self.embedding_matrix.append(term_vec_matrix)
+        self.embedding_matrix = np.array(self.embedding_matrix)
+
+    def _get_vector_from_tokens(self, tokens):
+        vec = []
+        for tok in tokens:
+            if tok.lemma_ in self.embeddings:
+                vec.append(self.embeddings[tok.lemma_])
+        # take average of vectors to achieve embedding for term
+        if vec:
+            vec = np.array(vec).mean(axis=0)
+        return vec
+
+    def _init_embeddings(self, load, save=True, topic_term_map_path=None, embedding_matrix_path=None, emb_type='glove-wiki-gigaword-50'):
+        self.embeddings = gensim.downloader.load(emb_type)
+        if not load:
+            self._create_eurovoc_embedding_matrix()
+            if save and (not topic_term_map_path or not embedding_matrix_path):
+                print("If you want to save the embeddings, you need to provide topic_term_map_path and embedding_matrix_path values.")
+            elif save and topic_term_map_path and embedding_matrix_path:
+                with open(embedding_matrix_path, "wb+") as fp:
+                    pickle.dump(self.embedding_matrix, fp)
+                with open(topic_term_map_path, "wb+") as fp:
+                    pickle.dump(self.topic_term_map, fp)
+        elif load and (not topic_term_map_path or not embedding_matrix_path):
+            print("If loading the eurovoc embeddings matrix, you need to provide a path for the topic term list and embedding matrix path.")
+            sys.exit(1)
+        elif load:
+            with open(embedding_matrix_path, "rb") as fp:
+                self.embedding_matrix = np.array(pickle.load(fp))
+            with open(topic_term_map_path, "rb") as fp:
+                self.topic_term_map = pickle.load(fp)
+        
     def _init_eurovoc(self, eurovoc_path):
         self.eurovoc = pd.read_csv(eurovoc_path)
         # remove non-whitelisted topic terms
@@ -154,6 +208,7 @@ class TDMAnalysis:
             self.eurovoc = self.eurovoc[m]
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
         self.eurovoc = self.eurovoc.set_index('index')
+        self.create_eurovoc_topic_term_map()
         # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
 
     def create_topic_proportions_per_year_df(self, remove_small_topics, threshold, merge_topics=False, include_names=False):
@@ -320,16 +375,39 @@ class TDMAnalysis:
                     score = score + weight
             c.update({topic: score})
         return c
-        
 
-    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False):
-        auto_topic_suggestions = Counter()
-        weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
-        # for prob, w in top_words:
-        #     weighted_topics_for_w = self.eurovoc_lookup(w, prob)
-        #     auto_topic_suggestions.update(weighted_topics_for_w)
-        # print([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)])
-        # str([(k, round(v, 2)) for k, v in auto_topic_suggestions.most_common(top_n)]) + str(i), 
+    def _get_embedding_scores(self, top_words):
+        c = Counter()
+        if isinstance(self.eurovoc, type(None)):
+            self._init_eurovoc(EUROVOC_PATH)
+        if not self.embeddings:
+            self._init_embeddings(True, save=False, topic_term_map_path="analysis_eurovoc_topic_to_term_map.pickle", embedding_matrix_path="analysis_eurovoc_embedding_matrix.pickle")
+        words = [self.nlp(w) for _,w in top_words]
+        word_vecs = []
+        for w in words:
+            vec = self._get_vector_from_tokens([tok for tok in w])
+            if type(vec) != list:
+                word_vecs.append(vec)
+        word_vecs = np.array(word_vecs)
+        for i, topic in enumerate(self.embedding_matrix):
+            # pairwise cosine sim between top words and topic term vectors
+            topic_mat = np.array(topic)
+            pairwise_sim = cosine_similarity(word_vecs, topic_mat)
+            # we want the average cosine similarity between each top word and each eurovoc label term.
+            # i.e. take the mean of the pairwise sim to get a score for the DTM topic and this eurovoc label
+            score = pairwise_sim.mean()
+            topic_name = self.eurovoc_topics[i]
+            c.update({topic_name: score})
+        return c
+
+    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False, score_type="tfidf"):
+        if score_type == "tfidf":
+            weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
+        elif score_type == "embedding":
+            weighted_ev_topics = self._get_embedding_scores(top_words)
+        else:
+            print("score_type needs to be one of either tfidf|embedding")
+            sys.exit(1)
         if stringify:
             return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
         elif return_raw_scores:
@@ -421,7 +499,7 @@ class TDMAnalysis:
             all_ev_topics.append(ev_topics)
         return all_ev_topics
 
-    def get_topic_names(self, auto=True, detailed=False, stringify=True, tfidf_enabled=True):
+    def get_topic_names(self, detailed=False, stringify=True, tfidf_enabled=True, _type="tfidf"):
         """
         
         """
@@ -430,18 +508,15 @@ class TDMAnalysis:
             sys.exit(1)
         self._init_eurovoc(EUROVOC_PATH)
         topic_names = {} if detailed else []
-        self.create_eurovoc_topic_term_map()
         self.top_word_arr = []
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
             # add top words to class object
             self.top_word_arr.append(top_words)
-            self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
-            if auto:
-                curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled)
-            else:
-                curr_topic_name = str([x[1]+str(i) for x in top_words[:3]])
+            if _type == "tfidf":
+                self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
+            curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled, score_type=_type)
             if detailed:
                 topic_names[curr_topic_name] = top_words
             else:
@@ -637,16 +712,19 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 3800 # number of lines in -mult.dat file.
+    NDOCS = 2447 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_labor_bigram"),
-        doc_year_map_file_name="model-year.dat",
-        seq_dat_file_name="model-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "greyroads_aeo_all_bigram"),
+        doc_year_map_file_name="greyroads-year.dat",
+        seq_dat_file_name="greyroads-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="k30_a0.01_var0.05",
+        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
         eurovoc_whitelist=False,
         )
-    res = tdma._get_baseline_topic_vectors(simple=False)
+    topic_names = tdma.get_topic_names(_type="embedding")
+    breakpoint()
+    print("he")
+    # res = tdma._get_baseline_topic_vectors(simple=False)

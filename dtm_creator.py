@@ -5,6 +5,8 @@
 import pandas as pd
 import os
 import spacy
+from spacy.util import filter_spans
+from spacy.tokens import Token
 from numpy import random
 from spacy.lang.en.stop_words import STOP_WORDS
 from spacy.matcher import PhraseMatcher
@@ -13,8 +15,9 @@ import json
 from multiprocessing import Pool
 from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
 
-bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-# bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
+# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
+ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS.txt")
 SEED = 42
 
 
@@ -22,21 +25,29 @@ class DTMCreator:
     def __init__(
         self, 
         model_root, 
-        csv_path, 
+        docs,
         text_col_name='section_txt', 
         date_col_name='date', 
         bigram=True, 
         limit=None, 
         years_per_step=1,
-        shuffle=True
+        shuffle=True,
+        spacy_batch_size=256,
     ):
-        if csv_path.endswith(".tsv"):
-            self.df = pd.read_csv(csv_path, sep="\t")
-        else:
-            self.df = pd.read_csv(csv_path)
-        self.df = self.df.dropna(subset=[text_col_name])
-        self.paragraphs = self.df[text_col_name].tolist()
-        self.dates = self._extract_dates(date_col_name)
+        self.spacy_batch_size = spacy_batch_size
+        if isinstance(docs, str):
+            # this is assumed to be path to df
+            if docs.endswith(".tsv"):
+                self.df = pd.read_csv(docs, sep="\t")
+            else:
+                self.df = pd.read_csv(docs)
+            self.df = self.df.dropna(subset=[text_col_name])
+            self.dates = self._extract_dates(date_col_name)
+            self.paragraphs = self.df[text_col_name].tolist()
+        elif isinstance(docs, list):
+            # this is assumed to be doc,year tuples already processed
+            self.paragraphs = [x for x,_ in docs]
+            self.dates = [int(x) for _,x in docs]
         self.bigram = bigram
         self.years_per_step = years_per_step
         # create directory structure
@@ -54,10 +65,10 @@ class DTMCreator:
         self.rdates = []
         rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))] if shuffle else range(len(self.paragraphs))
         if limit:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=256)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=self.spacy_batch_size)
             self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
         else:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=256)
+            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=self.spacy_batch_size)
             self.rdates = [self.dates[i] for i in rand_indexes]
         return
 
@@ -85,24 +96,60 @@ class DTMCreator:
         """
         raise NotImplementedError
 
-    def _add_bigrams(self):
-        bigrams = [x.strip("\n") for x in open(bigram_path, "r").readlines()]
+    def _add_bigrams(self, ngrams=False):
+        """This function retokenises spaCy documents to include bigrams (and ngrams if ngrams enabled) instead of just
+        single word tokens. It does this by referencing a corpus of pre-computed ngrams and finding matches of these ngrams
+        in the corpus using the spaCy PhraseMatcher class. Take a paragraph:
+
+        "The cat realised that climate change was important."
+
+        In the above sentence, we may have the phrase 'climate change' in our ngram reference corpus. spaCy has initially tokenised the sentence as:
+
+        ['the', 'cat', 'realised', 'that', 'climate', 'change', 'was', 'important', '.']
+
+        We want to have spaCy pick up 'climate change' as a single bigram. Thus we use the PhraseMatcher to find it in the original sentence, and retokenise
+        it. Such that the above tokenisation becomes:
+
+        ['the', 'cat', 'realised', 'that', 'climate change', 'was', 'important', '.']
+
+        We change the 'LEMMA' property of each token to represent the underscore connected ngram. For the 'climate change' token:
+
+        tok.lemma_ = 'climate_change'
+
+        Args:
+            ngrams (bool, optional): If set to true, instead of using just bigrams from bigram_path, ngrams will be matched
+                as well based on the ngrams found at ngram_path. Defaults to False.
+        """
+        self.ngram_match_counts = Counter()
+        # read in ngram file
+        if ngrams:
+            bigrams = [x.strip("\n") for x in open(ngram_path, "r").readlines()]
+        else:
+            bigrams = [x.strip("\n") for x in open(bigram_path, "r").readlines()]
+        # init matcher with all the ngrams
         bigram_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA")
-        for bigram in self.nlp.pipe(bigrams, n_process=11, batch_size=256):
+        for bigram in self.nlp.pipe(bigrams, n_process=11, batch_size=self.spacy_batch_size):
             bigram_matcher.add(bigram.text,[bigram])
         new_paras = []
+        count = 0
         for para in self.rdocs:
+            if count % 1000 == 0:
+                print(f"para {count}")
+            count += 1
             matches = bigram_matcher(para)
-            if matches:
-                para_text = para.text
-                for _id, start, end in matches:
-                    match_string = para[start:end]
-                    match_replace_with = self.nlp.vocab.strings[_id].replace(" ", "_")
-                    para_text = para_text.replace(match_string.text, match_replace_with)
-                new_paras.append(para_text)
-            else:
-                new_paras.append(para.text)
-        self.rdocs = self.nlp.pipe(new_paras, n_process=11, batch_size=256)
+            match_mapping = {para[start:end].lemma_:_id for _id, start, end in matches}
+            # we remove overlapping matches taking the longest match as the source of truth
+            # i.e. if we match 'climate change' and 'climate', we take 'climate change'.
+            filtered_spans = filter_spans([para[start:end] for _,start,end in matches])
+            if filtered_spans:
+                with para.retokenize() as r:
+                    for span in filtered_spans:
+                        _id = match_mapping[span.lemma_]
+                        match_replace_with = self.nlp.vocab.strings[_id].replace(" ", "_")
+                        r.merge(span, attrs={"LEMMA": match_replace_with})
+                        self.ngram_match_counts.update([self.nlp.vocab.strings[_id]])
+            new_paras.append(para)
+        self.rdocs = new_paras
 
     def _get_year_batches(self, years_list=None):
         years = years_list if years_list else self.rdates
@@ -149,17 +196,45 @@ class DTMCreator:
         breakpoint()
 
     def preprocess_paras(
-            self, 
+            self,
             min_freq=150, 
             write_vocab=False, 
             ds_lower_limit=1000, 
             us_upper_limit=200,
             enable_downsampling=False, 
-            enable_upsampling=False
+            enable_upsampling=False,
+            ngrams=False
         ):
+        """This function takes the spaCy documents found in this classes rdocs attribute and preprocesses them.
+        The preprocessing pipeline tokenises each document and removes:
+        1. punctuation
+        2. spaces
+        3. numbers
+        4. urls
+        5. stop words and single character words.
+
+        It then lemmatises and lowercases each token and joins multi-word tokens together with an _. i.e. 'climate change' becomes 'climate_change' in case this was not
+        done in the _add_bigrams function.
+
+        Once the tokens have been created, token frequency counts are taken and a vocabulary of tokens and their counts are created.
+        Ensuring that tokens only above a certain min_freq are kept in the vocabulary.
+
+        Finally class attributes are created in preparation for being input into a DTM. This requires a mult.dat and seq.dat file (see DTM documentation).
+
+        To save these class attributes you need to run self.write_dtm
+
+        Args:
+            min_freq (int, optional): Minimum count frequency of tokens in vocabulary. Defaults to 150.
+            write_vocab (bool, optional): Whether or not to write vocabulary to file. Defaults to False.
+            ds_lower_limit (int, optional): If downsampling is enabled, this is the number that a particular timesteps documents will be downsampled to. Defaults to 1000.
+            us_upper_limit (int, optional): If upsampling is enabled, the documents for a particular timestep will be increased to this number. Defaults to 200.
+            enable_downsampling (bool, optional): Whether or not downsampling is enabled. Defaults to False.
+            enable_upsampling (bool, optional): Whether or not upsampling is enabled. Defaults to False.
+            ngrams (bool, optional): Whether to add ngrams instead of just bigrams. Relies on self.bigrams to be True to have any effect. Defaults to False.
+        """
         if self.bigram:
             print("adding bigrams...")
-            self._add_bigrams()
+            self._add_bigrams(ngrams=ngrams)
         self.paras_processed = []
         wids = {}
         wids_rev = {}
@@ -182,7 +257,7 @@ class DTMCreator:
                         and not w.like_url \
                         and not w.text.lower() in STOP_WORDS \
                         and len(w.lemma_) > 1:
-                        words.append(w.lemma_.lower())
+                        words.append(w.lemma_.lower().replace(" ", "_"))
                 sents.append(words)
             self.paras_processed.append(sents)
         # count words
@@ -191,7 +266,7 @@ class DTMCreator:
                 for w in s:
                     self.wcounts[w]+=1           
 
-        # PREPROCESS: keep types that occur at least 150 times
+        # PREPROCESS: keep tokens that occur at least min_freq times
         self.wcounts = {k:v for k,v in self.wcounts.items() if v>min_freq} 
 
         # collect word IDs
@@ -209,7 +284,7 @@ class DTMCreator:
                     assert wids[wids_rev[i]]==i
                     of.write(f"{wids_rev[i]}\t{self.wcounts[wids_rev[i]]}\n")
                         
-        # transform
+        # transform to DTM input
         self.paras_to_wordcounts = []
         self.years_final = []
 
@@ -261,7 +336,7 @@ class DTMCreator:
 
     def _downsample(self, limit=1000):
         """
-        This function is used to downsample years where there are more than the upper_limit number of documents.
+        This function is used to downsample years where there are more than the limit number of documents.
         This will avoid oversampling certain years and hence skewing the models in favour of those years.
         This is typical behaviour for journals dataset, which has a lot more documents in the later years
         than earlier.
@@ -287,6 +362,12 @@ class DTMCreator:
         self.paras_to_wordcounts = paras_to_wordcounts
 
     def write_dtm(self, min_year=None, max_year=None):
+        """Write the mult.dat and seq.dat and year.dat files needed to fit the DTM
+
+        Args:
+            min_year (int, optional): If years_per_step is 1, can specify a particular cutoff min year to write to files. Defaults to min(self.dates).
+            max_year (int, optional): If years_per_step is 1, can specify a particular cutoff max year to write to files. Defaults to max(self.dates).
+        """
         # write -mult file and -seq file
         outmult = open(os.path.join(self.model_root, "model-mult.dat"), 'w+')
         outyear = open(os.path.join(self.model_root, "model-year.dat"), 'w+')
@@ -320,18 +401,11 @@ class DTMCreator:
         outyear.close()
         outmult.close()
         outseq.close()
-    
-    def get_preproc(self):
-        # get preprocessed paras, vocab and years
-        # preprocessed_paras, wcounts, rdates
-        df = pd.DataFrame({"para": self.paras_processed, "year": self.rdates})
-        return df, self.wcounts
 
-
-    
     def create(self, min_freq=150, ds_lower_limit=1000):
         self.preprocess_paras(min_freq=min_freq, write_vocab=True, ds_lower_limit=ds_lower_limit)
         self.write_dtm()
+
 
 def fit(run, model_root_dir, outpath):
     print(outpath)
@@ -434,5 +508,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_labor_bigram"))
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_2"))
     # fit_one()
