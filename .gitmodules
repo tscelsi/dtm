@@ -1,0 +1,3 @@
+[submodule "log-odds"]
+	path = log-odds
+	url = https://github.com/tscelsi/log-odds
