@@ -6,7 +6,7 @@ File that creates a DTM-compatible dataset for the 'journals' dataset as mention
 accompanying paper.
 """
 
-from .dtm_creator import DTMCreator
+from dtm_creator import DTMCreator
 import os
 
 class JournalDTMCreator(DTMCreator):
@@ -21,9 +21,10 @@ def create_model_inputs(model_root, csv_path, bigram=True, limit=None, min_freq=
 
 if __name__ == "__main__":
     # replace
-    create_model_inputs(
-        os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500_upsampled_200"), 
-        os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"), 
-        bigram=True, 
-        limit=None,
-        ds_upper_limit=500)
+    # create_model_inputs(
+    #     os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_2"), 
+    #     os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"), 
+    #     bigram=True, 
+    #     limit=None)
+    jdtmc = JournalDTMCreator("journal_energy_policy_applied_energy_all_years_abstract_all_ngram", os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"), text_col_name='section_txt', date_col_name='date', bigram=True, limit=None)
+    jdtmc.preprocess_paras(ngrams=True, write_vocab=True)

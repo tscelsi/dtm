@@ -9,7 +9,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
 import visualisation as v
-
+import sys
 # local
 from analysis import TDMAnalysis
 
@@ -31,6 +31,59 @@ class AcrossModelAnalysis:
     
     We group the topics from each model into clusters using kmeans.
     """
+
+    EUROVOC_TOPICS = [
+        '6606 energy policy',
+        '4026 accounting',
+        '6411 technology and technical regulations',
+        '7236 political geography',
+        '2016 trade',
+        '6616 oil industry',
+        '6621 electrical and nuclear industries',
+        '5211 natural environment',
+        '6811 chemistry',
+        '2451 prices',
+        '2026 consumption',
+        '6416 research and intellectual property',
+        '6831 building and public works',
+        '6611 coal and mining industries',
+        '6406 production',
+        '7231 economic geography',
+        '4811 organisation of transport',
+        '6821 mechanical engineering',
+        '3611 humanities',
+        '0436 executive power and public service',
+        '5216 deterioration of the environment',
+        '2006 trade policy',
+        '2446 taxation',
+        '6626 soft energy',
+        '6836 wood industry',
+        '2421 free movement of capital',
+        '4816 land transport',
+        '0406 political framework',
+        '2036 distributive trades',
+        '3221 documentation',
+        '1626 national accounts',
+        '6816 iron, steel and other metal industries',
+        '4021 management',
+        '7621 world organisations',
+        '3226 communications',
+        '1611 economic conditions',
+        '1221 justice',
+        '1206 sources and branches of the law',
+        '1621 economic structure',
+        '5621 cultivation of agricultural land',
+        '3606 natural and applied sciences',
+        '2846 construction and town planning',
+        '5206 environmental policy',
+        '1631 economic analysis',
+        '2426 financing and investment',
+        '2416 financial institutions and credit',
+        '1606 economic policy',
+        '6826 electronics and electrical engineering',
+        '2031 marketing'
+    ]
+
     def __init__(self, m1, m2, m1_alias="M1", m2_alias="M2"):
         """
         pass two model parameter dictionaries into this class in order to create analysis classes
@@ -109,8 +162,9 @@ class AcrossModelAnalysis:
         common vocabulary.
 
         v_common = ["cat", "hat", "door", "rat", "mouse", "jerry"]
-        k_m1_common = [0.7, 0.3, 0, 0, 0, 0]
-        k_m2_common = [0.2, 0, 0, 0, 0.4, 0.4]
+        k_m1_common = [0.7, 0.3, 0.0001, 0, 0, 0]
+        k_m2_common = [0.2, 0.001, 0, 0, 0.4, 0.4]
+
 
         we can now compute similarity measures of these same-dimension 'vectors'.
         """
@@ -157,6 +211,8 @@ class AcrossModelAnalysis:
                     t1_val.append(t1_ind)
                     t2_val.append(t2_ind)
                     sim_val.append(val)
+            m1_title = self.m1_alias if self.m1_alias else m1_title
+            m2_title = self.m2_alias if self.m2_alias else m2_title
             df = pd.DataFrame({m1_title: t1_val, m2_title: t2_val, "Similarity": sim_val})
             self.heatmap_data = df.pivot(index=m1_title, columns=m2_title, values='Similarity')
             return self.heatmap_data
@@ -195,7 +251,7 @@ class AcrossModelAnalysis:
         if type(model.eurovoc) != pd.DataFrame:
             model._init_eurovoc(EUROVOC_PATH)
             model.create_eurovoc_topic_term_map()
-        topic_indices = sorted(model.eurovoc_topics)
+        topic_indices = sorted(self.EUROVOC_TOPICS)
         topic_vectors = []
         max = []
         for i in range(model.ntopics):
@@ -214,58 +270,213 @@ class AcrossModelAnalysis:
         # accrue all relevant vector representations of DTM topics
         m1_tfidf_vec, m1_tfidf_ind = self._get_eurovoc_topic_vectors(self.m1, scale=False)
         m1_simple_vec, m1_simple_ind = self._get_eurovoc_topic_vectors(self.m1, tfidf_enabled=False, scale=False)
-        m1_simple_baseline, m1_intell_baseline = self.m1.generate_baselines()
+        m1_simple_baseline, m1_thresh_baseline, m1_top_ten_baseline, m1_thresh_baseline_zeroed, m1_top_ten_baseline_zeroed = self.m1.generate_baselines(indices=self.EUROVOC_TOPICS)
         m2_tfidf_vec, m2_tfidf_ind = self._get_eurovoc_topic_vectors(self.m2)
         m2_simple_vec, m2_simple_ind = self._get_eurovoc_topic_vectors(self.m2, tfidf_enabled=False)
-        m2_simple_baseline, m2_intell_baseline = self.m2.generate_baselines()
+        m2_simple_baseline, m2_thresh_baseline, m2_top_ten_baseline, m2_thresh_baseline_zeroed, m2_top_ten_baseline_zeroed = self.m2.generate_baselines(indices=self.EUROVOC_TOPICS)
         assert m1_tfidf_ind == m2_tfidf_ind == m1_simple_ind == m2_simple_ind
         simple_baseline_sim = self._get_similarity(m1_simple_baseline, m2_simple_baseline, return_plottable=False)
-        intell_baseline_sim = self._get_similarity(m1_intell_baseline, m2_intell_baseline, return_plottable=False)
+        thresh_baseline_sim = self._get_similarity(m1_thresh_baseline, m2_thresh_baseline, return_plottable=False)
+        top_ten_baseline_sim = self._get_similarity(m1_top_ten_baseline, m2_top_ten_baseline, return_plottable=False)
+        thresh_zeroed_baseline_sim = self._get_similarity(m1_thresh_baseline_zeroed, m2_thresh_baseline_zeroed, return_plottable=False)
+        top_ten_zeroed_baseline_sim = self._get_similarity(m1_top_ten_baseline_zeroed, m2_top_ten_baseline_zeroed, return_plottable=False)
         eurovoc_tfidf_sim = self._get_similarity(m1_tfidf_vec, m2_tfidf_vec, return_plottable=False)
         eurovoc_simple_sim = self._get_similarity(m1_simple_vec, m2_simple_vec, return_plottable=False)
         gold_standard = self._get_similarity(return_plottable=False)
-        self._compare_with_gold_standard(simple_baseline_sim, gold_standard, "Simple Baseline")
-        self._compare_with_gold_standard(intell_baseline_sim, gold_standard, "Intelligent Baseline")
-        self._compare_with_gold_standard(eurovoc_simple_sim, gold_standard, "Eurovoc Simple")
-        self._compare_with_gold_standard(eurovoc_tfidf_sim, gold_standard, "Eurovoc Tfidf")
-        breakpoint()
+        simple_base_res = self._compare_with_gold_standard(simple_baseline_sim, gold_standard, "Simple Baseline")
+        thresh_base_res = self._compare_with_gold_standard(thresh_baseline_sim, gold_standard, "Intelligent Baseline")
+        top_ten_base_res = self._compare_with_gold_standard(top_ten_baseline_sim, gold_standard, "Top Ten Baseline")
+        thresh_zeroed_base_res = self._compare_with_gold_standard(thresh_zeroed_baseline_sim, gold_standard, "Intelligent Baseline Zeroed")
+        top_ten_zeroed_base_res = self._compare_with_gold_standard(top_ten_zeroed_baseline_sim, gold_standard, "Top Ten Baseline Zeroed")
+        simple_ev_res = self._compare_with_gold_standard(eurovoc_simple_sim, gold_standard, "Eurovoc Simple")
+        tfidf_ev_res = self._compare_with_gold_standard(eurovoc_tfidf_sim, gold_standard, "Eurovoc Tfidf")
+        return simple_base_res, thresh_base_res, top_ten_base_res, thresh_zeroed_base_res, top_ten_zeroed_base_res, simple_ev_res, tfidf_ev_res
     
-    def get_similar_topics(self, threshold=0.5, gt=True, **kwargs):
+    def get_similar_topics(self, threshold=0.5, gt=True, fp=sys.stdout, **kwargs):
+        fp.write("#"*10 + "\n")
+        fp.write(f"## FINDING SIMILAR TOPICS BETWEEN {self.m1_alias} AND {self.m2_alias} ##\n")
+        fp.write("#"*10 + "\n")
         res = self._get_similarity(return_plottable=False)
         self.m1.get_top_words(with_prob=False, **kwargs)
         self.m2.get_top_words(with_prob=False, **kwargs)
         for m1_topic_ind in range(len(res)):
             for m2_topic_ind in range(len(res[m1_topic_ind])):
                 if gt and res[m1_topic_ind][m2_topic_ind] > threshold:
-                    print(f"{self.m1_alias} topic {m1_topic_ind} and {self.m2_alias} topic {m2_topic_ind} are similar (sim={res[m1_topic_ind][m2_topic_ind]}).")
-                    print(f"{self.m1_alias} topic {m1_topic_ind} top words:")
-                    print(self.m1.top_word_arr[m1_topic_ind])
-                    print(f"{self.m2_alias} topic {m2_topic_ind} top words:")
-                    print(self.m2.top_word_arr[m2_topic_ind])
-                    print("==========")
-                elif not gt and res[m1_topic_ind][m2_topic_ind] < threshold:
-                    print(f"{self.m1_alias} topic {m1_topic_ind} and {self.m2_alias} topic {m2_topic_ind} are NOT similar (sim={res[m1_topic_ind][m2_topic_ind]}).")
-                    print(f"{self.m1_alias} topic {m1_topic_ind} top words:")
-                    print(self.m1.top_word_arr[m1_topic_ind])
-                    print(f"{self.m2_alias} topic {m2_topic_ind} top words:")
-                    print(self.m2.top_word_arr[m2_topic_ind])
-                    print("==========")
+                    fp.write(f"{self.m1_alias} topic {m1_topic_ind} and {self.m2_alias} topic {m2_topic_ind} are similar (sim={res[m1_topic_ind][m2_topic_ind]}).\n")
+                    fp.write(f"{self.m1_alias} topic {m1_topic_ind} top words:\n")
+                    fp.write(str(self.m1.top_word_arr[m1_topic_ind])+"\n")
+                    fp.write(f"{self.m2_alias} topic {m2_topic_ind} top words:\n")
+                    fp.write(str(self.m2.top_word_arr[m2_topic_ind])+"\n")
+                    fp.write("==========\n")
+                # elif not gt and res[m1_topic_ind][m2_topic_ind] < threshold:
+                #     print(f"{self.m1_alias} topic {m1_topic_ind} and {self.m2_alias} topic {m2_topic_ind} are NOT similar (sim={res[m1_topic_ind][m2_topic_ind]}).")
+                #     print(f"{self.m1_alias} topic {m1_topic_ind} top words:")
+                #     print(self.m1.top_word_arr[m1_topic_ind])
+                #     print(f"{self.m2_alias} topic {m2_topic_ind} top words:")
+                #     print(self.m2.top_word_arr[m2_topic_ind])
+                #     print("==========")
+
+    def get_unique_topics(self, threshold=0.25, fp=sys.stdout, **kwargs):
+        """This function return the topics from both model 1 that are not similar to any topics within model 2 and vice-versa. Thus allowing
+        us to see topics that are unique between publications/datasets. i.e. if a topic appears in model 1 and not in model 2, then that topic is unique
+        to the discussions found in model 1's dataset.
+        """
+        fp.write("#"*10 + "\n")
+        fp.write(f"## FINDING UNIQUE TOPICS IN {self.m1_alias} AND {self.m2_alias} ##\n")
+        fp.write("#"*10+ "\n")
+        def print_unique_topic(ind, max_sim, model_name):
+            if model_name == "m1":
+                model = self.m1
+                alias = self.m1_alias
+            else:
+                model = self.m2
+                alias = self.m2_alias
+            fp.write(f"Topic {ind} in {alias} is unique (max_sim={max_sim}).\n")
+            fp.write("---\n")
+            fp.write(f"Topic label: {model.topic_names[ind]}\n")
+            fp.write("---\n")
+            fp.write(f"Topic word list: {model.top_word_arr[ind]}\n")
+            fp.write("==========\n")
+        m1_unique_topics = []
+        m2_unique_topics = []
+        res = self._get_similarity(return_plottable=False)
+        res_T = res.T
+        self.m1.get_topic_names(**kwargs)
+        self.m2.get_topic_names(**kwargs)
+        for m1_topic_ind in range(len(res)):
+            max_sim = res[m1_topic_ind].max()
+            if max_sim <= threshold:
+                m1_unique_topics.append(m1_topic_ind)
+                print_unique_topic(m1_topic_ind, max_sim, "m1")
+        for m2_topic_ind in range(len(res_T)):
+            max_sim = res_T[m2_topic_ind].max()
+            if max_sim <= threshold:
+                m2_unique_topics.append(m2_topic_ind)
+                print_unique_topic(m2_topic_ind, max_sim, "m2")
 
     def _compare_with_gold_standard(self, X, gold, name):
         total_sim = self._get_similarity(X, gold, return_plottable=False)
+        total_sim_T = self._get_similarity(X.T, gold.T, return_plottable=False)
         comparison_vals = []
+        # assuming that both models have same number of topics...
         for i in range(len(total_sim)):
             comparison_vals.append(total_sim[i][i])
+            comparison_vals.append(total_sim_T[i][i])
+
         average_similarity_across_methods = np.array(comparison_vals).mean()
-        print("==========")
-        print(f"{name} has mean similarity to gold standard of: {average_similarity_across_methods}")
+        # print("==========")
+        # print(f"{name} has mean similarity to gold standard of: {average_similarity_across_methods}")
+        return average_similarity_across_methods
     
     def get_heatmap(self, **kwargs):
         save_path = kwargs.pop("save_path", None)
         res = self._get_similarity(return_plottable=True, **kwargs)
         v.heatmap(res, save_path)
         return res
+
+def compare_all_models():
+    models = [{
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "greyroads-year.dat",
+        "seq_dat_file_name": "greyroads-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "IEO"
+    }, {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "greyroads-year.dat",
+        "seq_dat_file_name": "greyroads-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "AEO"
+    }, {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "eiajournal-year.dat",
+        "seq_dat_file_name": "eiajournal-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "Journals - All"
+    }, {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "eiajournal-year.dat",
+        "seq_dat_file_name": "eiajournal-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "Journals - Biofuels"
+    }, {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "eiajournal-year.dat",
+        "seq_dat_file_name": "eiajournal-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "Journals - Solar"
+    }, {
+        "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_coal_bigram"),
+        "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
+        "doc_year_map_file_name": "eiajournal-year.dat",
+        "seq_dat_file_name": "eiajournal-seq.dat",
+        "vocab_file_name": "vocab.txt",
+        "eurovoc_whitelist": False,
+        "alias": "Journals - Coal"
+    }]
+    m1_list = []
+    m2_list = []
+    simple_baseline = []
+    thresh_baseline = []
+    thresh_baseline_zeroed = []
+    top_ten_baseline = []
+    top_ten_baseline_zeroed = []
+    simple_ev = []
+    tfidf_ev = []
+    # simple_base_res, thresh_base_res, top_ten_base_res, thresh_zeroed_base_res, top_ten_zeroed_base_res, simple_ev_res, tfidf_ev_res
+    for i in range(len(models)):
+        for j in range(len(models)):
+            if j <= i:
+                continue
+            m1 = models[i]
+            m2 = models[j]
+            m1_name = m1['alias']
+            m2_name = m2['alias']
+            print(f"{m1_name} vs {m2_name}")
+            m1_list.append(m1_name)
+            m2_list.append(m2_name)
+            ama = AcrossModelAnalysis(m1, m2, m1_alias=m1_name, m2_alias=m2_name)
+            res = get_model_summary(ama)
             
+            simple_baseline.append(res[0])
+            thresh_baseline.append(res[1])
+            top_ten_baseline.append(res[2])
+            thresh_baseline_zeroed.append(res[3])
+            top_ten_baseline_zeroed.append(res[4])
+            simple_ev.append(res[5])
+            tfidf_ev.append(res[6])
+    df = pd.DataFrame({
+        "Model 1": m1_list, 
+        "Model 2": m2_list, 
+        "Simple Base": simple_baseline, 
+        "Thresh. Base": thresh_baseline, 
+        "Top Ten Base": top_ten_baseline, 
+        "Thresh. Base Zeroed": thresh_baseline_zeroed, 
+        "Top Ten Base Zeroed": top_ten_baseline_zeroed, 
+        "Simple EV": simple_ev, 
+        "Tfidf EV": tfidf_ev})
+    df.to_csv("ev_comparison_matrix.csv")
+    breakpoint()
+
+def get_model_summary(ama):
+    res = ama.evaluate_eurovoc_labels()
+    with open(f"{ama.m1_alias}_{ama.m2_alias}_similar_topics.txt", "w+") as fp:
+        ama.get_similar_topics(fp=fp)
+    with open(f"{ama.m1_alias}_{ama.m2_alias}_unique_topics.txt", "w+") as fp:
+        ama.get_unique_topics(fp=fp)
+    # ama.get_heatmap(save_path=f"{'_'.join(ama.m1_alias.split(' '))}_v_{'_'.join(ama.m2_alias.split(' '))}")
+    return res
+
 def test():
     m1 = {
         "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all_bigram"),
@@ -309,36 +520,3 @@ if __name__ == "__main__":
         "vocab_file_name": "vocab.txt",
         "eurovoc_whitelist": False
     }
-    # m2 = {
-    #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "model_aeo_all_bigram"),
-    #     "model_out_dir": "model_run_topics30_alpha0.01_topic_var0.05", 
-    #     "doc_year_map_file_name": "model-year.dat",
-    #     "seq_dat_file_name": "model-seq.dat",
-    #     "vocab_file_name": "vocab.txt",
-    #     "eurovoc_whitelist": False
-    # }
-    ama = AcrossModelAnalysis(m1, m2, m1_alias="Labor", m2_alias="Not Labor")
-    # ama.get_similar_topics(gt=False, threshold=-0.2, n=20)
-    ama.get_heatmap(save_path="labor_vs_not_labor.png", m1_title="Labor", m2_title="Not Labor")
-    # res = ama.run_clustering()
-    # ama.compare_topic_labels()
-    ama.evaluate_eurovoc_labels()
-    # ama.m1.get_topic_names()
-    # ama.m2.get_topic_names()
-    # breakpoint()
-    # ama.evaluate_eurovoc_labels()
-
-    # m1_top_words = []
-    # m2_top_words = []
-    # for i in range(30):
-    #     word_dist_arr_ot = ama.m1.get_topic_word_distributions_ot(i)
-    #     top_words = ama.m1.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=False)
-    #     m1_top_words.append(top_words)
-    # for i in range(30):
-    #     word_dist_arr_ot = ama.m2.get_topic_word_distributions_ot(i)
-    #     top_words = ama.m2.get_words_for_topic(word_dist_arr_ot, n=6, with_prob=False)
-    #     m2_top_words.append(top_words)
-    # for m1_topic, m2_topic in res:
-    #     print("==========")
-    #     print(f"m1 topic: {m1_top_words[m1_topic]}")
-    #     print(f"m2 topic: {m2_top_words[m2_topic]}")
