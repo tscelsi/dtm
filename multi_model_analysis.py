@@ -73,26 +73,25 @@ def analyse_model():
 
 def journals_analyse_multi_models():
     datasets = [
+        # {
+        #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500"),
+        #     "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
+        #     "ndocs": 9878,
+        #     "bigram": True,
+        #     "downsample_limit": 500
+        # },
         {
-            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500"),
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_2"),
             "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "ndocs": 9878,
+            "ndocs": 24323,
             "bigram": True,
-            "downsample_limit": 500
-        },
-        {
-            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500_upsampled_200"),
-            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "ndocs": 10767,
-            "bigram": True,
-            "downsample_limit": 500
         }
     ]
     for ds in datasets:
         print("=========")
         print(f"DATASET: {ds['model_root']}")
         dirs = os.listdir(ds['model_root'])
-        df_models = [x for x in dirs if x.startswith("model_run_")]
+        df_models = [x for x in dirs if x.startswith("k")]
         coherences = {}
         for model in df_models:
             print(f"analysing model {model}")
@@ -104,7 +103,7 @@ def journals_analyse_multi_models():
                 ds['bigram'],
                 ds.get("limit"),
                 ds['ndocs'], 
-                int(model.split("_")[2].split("topics")[1]), 
+                int(model.split("_")[0].split("k")[1]), 
                 model_root=ds['model_root'],
                 doc_year_map_file_name="model-year.dat",
                 seq_dat_file_name="model-seq.dat",
@@ -112,7 +111,7 @@ def journals_analyse_multi_models():
                 model_out_dir=model,
                 eurovoc_whitelist=False
             )
-            coh.init_coherence(ds_upper_limit=ds['downsample_limit'])
+            coh.init_coherence()
             analyse(coh, ds, model, coherences)
 
 
