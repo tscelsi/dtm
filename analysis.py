@@ -620,7 +620,7 @@ class TDMAnalysis:
             print(f"{year}\t{top_words}")
             print("-----")
     
-    def time_evolution_plot(self, dfs, filename, title=None, scale=1):
+    def time_evolution_plot(self, dfs, filename, title=None, scale=1, save=True):
         sns.set_context("talk")
         sns.set_style("ticks")
         sns.set_style({'axes.spines.bottom': True,
@@ -636,18 +636,24 @@ class TDMAnalysis:
         #ax.set_ylim([0 - max_val, len(dfs.index) + max_val])
         #ax.set(ylim=(0 - max_val, len(dfs.index) + max_val))
         plt.yticks([])
-        plt.xticks(range(1,len(dfs)))
+        x_domain = [x for x in range(1,len(dfs)+1)]
+        x_labels = dfs.index.tolist()
+        assert len(x_domain) == len(x_labels)
+        plt.xticks(x_domain)
+        ax.set_xticklabels(x_labels)
         max_val = scale * dfs.max().max() + 5
         #print(max_val)
 
         for i, t in enumerate(reversed(dfs.columns)):
-            plt.fill_between(dfs.index, dfs[t] + i*max_val, i*max_val - dfs[t], label=t)
-            plt.text(20, (i+0.) *max_val, t)
+            plt.fill_between(x_domain, dfs[t] + i*max_val, i*max_val - dfs[t], label=t)
+            plt.text(len(dfs) + 0.3, (i+0.) *max_val, t)
 
         plt.xlabel('Year')
         if title:
             plt.title(title)
-        plt.savefig(filename, dpi=150, bbox_inches="tight")
+        if save:
+            plt.savefig(filename, dpi=150, bbox_inches="tight")
+        return plt
     
     def get_sorted_columns(self, df):
         
@@ -658,13 +664,13 @@ class TDMAnalysis:
         sel2 = sel2.drop('peak_pos')
         return sel2.columns
     
-    def plot_topics_ot(self, save_path, include_names=False):
+    def plot_topics_ot(self, save_path, include_names=False, save=True):
         df_scores = self.create_plottable_topic_proportion_ot_df(include_names=include_names)
         for i in df_scores.index:
             df_scores.loc[i] = df_scores.loc[i] / df_scores.loc[i].sum() * 100
         sorted_selection = self.get_sorted_columns(df_scores)
-        self.time_evolution_plot(df_scores[sorted_selection], save_path, scale=1.3)
-        return
+        plt = self.time_evolution_plot(df_scores[sorted_selection], save_path, scale=1.3, save=save)
+        return plt
 
 def compare_coherences(dataset_root, analysis_folder):
     pmi_c = Counter()
@@ -717,11 +723,11 @@ if __name__ == "__main__":
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "greyroads_aeo_all_bigram"),
-        doc_year_map_file_name="greyroads-year.dat",
-        seq_dat_file_name="greyroads-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_last_20_years"),
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
+        model_out_dir="k30_a0.01_var0.05",
         eurovoc_whitelist=False,
         )
     topic_names = tdma.get_topic_names(_type="embedding")

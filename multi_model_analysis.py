@@ -3,45 +3,51 @@ import pandas as pd
 from coherence import CoherenceAnalysis
 from pprint import pprint
 
-def analyse(coh, ds, model, coherences):
+def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
     analysis_save_dir = os.path.join(ds['model_root'],"analysis_all_eurovoc_topics")
     if not os.path.isdir(analysis_save_dir):
         os.mkdir(analysis_save_dir)
+    if plot:
     # plot the topic distributions over time for this model
-    print("plotting topics...")
-    coh.plot_topics_ot(os.path.join(analysis_save_dir, f"{model}.png"))
-    # get the coherence of this model
-    print("calculating coherence...")
-    pmi_coh = coh.get_coherence()
-    npmi_coh = coh.get_coherence("c_npmi")
-    coherences[model] = {}
-    coherences[model]['pmi'] = pmi_coh
-    coherences[model]['npmi'] = npmi_coh
-    with open(os.path.join(analysis_save_dir, "coherences.txt"), "w") as fp:
-        fp.write("Model\tPMI\tNPMI\n")
-        for k,v in coherences.items():
-            fp.write(f"{k}\t{v['pmi']}\t{v['npmi']}\n")
-    topic_analysis_save_dir = os.path.join(analysis_save_dir, "topic_analysis")
-    if not os.path.isdir(topic_analysis_save_dir):
-        os.mkdir(topic_analysis_save_dir)
-    model_topic_analysis_save_dir = os.path.join(topic_analysis_save_dir, model)
-    if not os.path.isdir(model_topic_analysis_save_dir):
-        os.mkdir(model_topic_analysis_save_dir)
-    # get the top 10 topic words for all time
-    topic_names = coh.get_topic_names()
-    with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp:
-        for i in range(len(topic_names)):
-            word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
-            topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
-            fp.write(f"topic {i} ({topic_names[i]})\n{topic_top_terms}\n==========\n")
-    # get the top 10 topic words for each topic over time
-    with open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp:
-        for i in range(len(topic_names)):
-            topw_df = coh.create_top_words_df()
-            fp.write(f"\n=========\ntopic {i} ({topic_names[i]})\n=========\n\n")
-            top_words_for_topic = topw_df[topw_df['topic_idx'] == i].loc[:, ['year', 'top_words']]
-            for row in top_words_for_topic.itertuples():
-                fp.write(f"{row.year}\t{row.top_words}\n")
+        print("plotting topics...")
+        try:
+            coh.plot_topics_ot(os.path.join(analysis_save_dir, f"{model}.png"))
+        except Exception as e:
+            print(f"plot failed for model: {model}")
+    if coherence:
+        # get the coherence of this model
+        print("calculating coherence...")
+        pmi_coh = coh.get_coherence()
+        npmi_coh = coh.get_coherence("c_npmi")
+        coherences[model] = {}
+        coherences[model]['pmi'] = pmi_coh
+        coherences[model]['npmi'] = npmi_coh
+        with open(os.path.join(analysis_save_dir, "coherences.txt"), "w") as fp:
+            fp.write("Model\tPMI\tNPMI\n")
+            for k,v in coherences.items():
+                fp.write(f"{k}\t{v['pmi']}\t{v['npmi']}\n")
+    if terms:
+        topic_analysis_save_dir = os.path.join(analysis_save_dir, "topic_analysis")
+        if not os.path.isdir(topic_analysis_save_dir):
+            os.mkdir(topic_analysis_save_dir)
+        model_topic_analysis_save_dir = os.path.join(topic_analysis_save_dir, model)
+        if not os.path.isdir(model_topic_analysis_save_dir):
+            os.mkdir(model_topic_analysis_save_dir)
+        # get the top 10 topic words for all time
+        topic_names = coh.get_topic_names()
+        with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp:
+            for i in range(len(topic_names)):
+                word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
+                topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
+                fp.write(f"topic {i} ({topic_names[i]})\n{topic_top_terms}\n==========\n")
+        # get the top 10 topic words for each topic over time
+        with open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp:
+            for i in range(len(topic_names)):
+                topw_df = coh.create_top_words_df()
+                fp.write(f"\n=========\ntopic {i} ({topic_names[i]})\n=========\n\n")
+                top_words_for_topic = topw_df[topw_df['topic_idx'] == i].loc[:, ['year', 'top_words']]
+                for row in top_words_for_topic.itertuples():
+                    fp.write(f"{row.year}\t{row.top_words}\n")
 
 def analyse_model():
     dataset = {
@@ -117,16 +123,46 @@ def journals_analyse_multi_models():
 
 def hansard_analyse_multi_models():
     datasets = [
+        # {
+        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a"),
+        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
+        #     "ndocs": 15457,
+        #     "bigram": True,
+        # },
+        # {
+        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2b"),
+        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2b.csv"),
+        #     "ndocs": 14519,
+        #     "bigram": True,
+        # },
+        # {
+        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2c"),
+        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2c.csv"),
+        #     "ndocs": 15457,
+        #     "bigram": True,
+        # },
+        # {
+        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2d"),
+        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2d.csv"),
+        #     "ndocs": 16174,
+        #     "bigram": True,
+        # },
         {
-            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_lea_test"),
-            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "final_1000_40000_lea_0906.tsv"),
-            "ndocs": 6198,
-            "bigram": False,
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_last_20_years"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a_last_20_years.csv"),
+            "ndocs": 7317,
+            "bigram": True,
         },
+        # {
+        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a"),
+        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
+        #     "ndocs": 15457,
+        #     "bigram": True,
+        # }
     ]
     for ds in datasets:
         dirs = os.listdir(ds['model_root'])
-        df_models = [x for x in dirs if x.startswith("model_run_")]
+        df_models = [x for x in dirs if x.startswith("k")]
         coherences = {}
         for model in df_models:
             coh = CoherenceAnalysis(
@@ -137,7 +173,7 @@ def hansard_analyse_multi_models():
                 ds['bigram'],
                 ds.get("limit"),
                 ds['ndocs'], 
-                int(model.split("_")[2].split("topics")[1]), 
+                int(model.split("_")[0].split("k")[1]), 
                 model_root=ds['model_root'],
                 doc_year_map_file_name="model-year.dat",
                 seq_dat_file_name="model-seq.dat",
@@ -148,7 +184,7 @@ def hansard_analyse_multi_models():
             print("initialising coherence...")
             coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
             print("done! analysing...")
-            analyse(coh, ds, model, coherences)
+            analyse(coh, ds, model, coherences, coherence=False, terms=False)
 
 def validate_multi_models():
     greyroads_datasets = [
@@ -254,6 +290,6 @@ def validate_multi_models():
 if __name__ == "__main__":
     # greyroads_analyse_multi_models()
     # validate_multi_models()
-    # hansard_analyse_multi_models()
-    journals_analyse_multi_models()
+    hansard_analyse_multi_models()
+    # journals_analyse_multi_models()
     # analyse_model()
