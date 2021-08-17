@@ -29,23 +29,46 @@ EUROVOC_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_export_en.cs
 class TDMAnalysis:
 
     whitelist_eurovoc_topics = [
-        "0421 parliament",
-        "0431 politics and public safety",
-        "0806 international affairs",
-        "0816 international security",
-        "1611 economic conditions",
-        "1616 regions and regional policy",
-        "2016 trade",
-        "2021 international trade",
-        "2411 monetary economics",
-        "5206 environmental policy",
-        "5211 natural environment",
-        "5216 deterioration of the environment",
-        "6606 energy policy",
-        "6611 coal and mining industries",
-        "6616 oil industry",
-        "6621 electrical and nuclear industries",
-        "6816 iron, steel and other metal industries"
+        '6621 electrical and nuclear industries',
+        '6616 oil industry',
+        '6611 coal and mining industries',
+        '6406 production',
+        '2451 prices',
+        '6831 building and public works',
+        '2026 consumption',
+        '6836 wood industry',
+        '4026 accounting',
+        '4816 land transport',
+        '2016 trade',
+        '6416 research and intellectual property',
+        '7621 world organisations',
+        '4811 organisation of transport',
+        '6626 soft energy',
+        '2036 distributive trades',
+        '2006 trade policy',
+        '6826 electronics and electrical engineering',
+        '2446 taxation',
+        '1631 economic analysis',
+        '6811 chemistry',
+        '3611 humanities',
+        '5216 deterioration of the environment',
+        '2816 demography and population',
+        '6821 mechanical engineering',
+        '3606 natural and applied sciences',
+        '7226 asia and oceania',
+        '1216 criminal law',
+        '6411 technology and technical regulations',
+        '1611 economic conditions',
+        '7216 america',
+        '1621 economic structure',
+        '5211 natural environment',
+        '0821 defence',
+        '6816 iron, steel and other metal industries',
+        '4016 legal form of organisations',
+        '6036 food technology',
+        '2421 free movement of capital',
+        '7206 europe',
+        '1016 european construction'
     ]
 
     topic_cluster_mapping = {
@@ -151,7 +174,12 @@ class TDMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
-    def _create_eurovoc_embedding_matrix(self, save=True):
+    def _create_eurovoc_embedding_matrix(self):
+        """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
+        T_k is the number of terms for a eurovoc label k and gloVedims is the dimensions of the pre-trained gloVe word embeddings as per gensim docs.
+
+        To create this matrix this function iterates through the terms of a eurovoc label 
+        """
         self.topic_term_map = {}
         self.embedding_matrix = []
         for topic in self.eurovoc_topics:
@@ -208,8 +236,25 @@ class TDMAnalysis:
             self.eurovoc = self.eurovoc[m]
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
         self.eurovoc = self.eurovoc.set_index('index')
-        self.create_eurovoc_topic_term_map()
+        self._create_eurovoc_topic_term_map()
         # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
+
+    def _get_topic_proportions_per_year(self, logged=False):
+        """This function returns a pandas DataFrame of years and their corresponding
+        topic proportions such that for a year, the topic proportions sum to one. 
+        i.e. how probable is it that topic X appears in year Y.
+        """
+        def get_topic_proportions(row, logged):
+            total = np.sum(row)
+            if logged:
+                return [np.log(topic / total) for topic in row]
+            else:
+                return [topic / total for topic in row]
+        grouping = self.doc_topic_gammas.groupby('year')
+        x = grouping.topic_dist.apply(np.sum)
+        # assign self the list of years 
+        topic_proportions_per_year = x.apply(lambda x: get_topic_proportions(x, logged))
+        return topic_proportions_per_year
 
     def create_topic_proportions_per_year_df(self, remove_small_topics, threshold, merge_topics=False, include_names=False):
         """
@@ -223,14 +268,7 @@ class TDMAnalysis:
         # Here I have begun working on retrieving the importance of topics over
         # time. That is, the Series topic_proportions_per_year contains the
         # importance of each topic for particular years.
-        def get_topic_proportions(row):
-            total = np.sum(row)
-            return [topic / total for topic in row]
-
-        grouping = self.doc_topic_gammas.groupby('year')
-        x = grouping.topic_dist.apply(np.sum)
-        # assign self the list of years 
-        topic_proportions_per_year = x.apply(get_topic_proportions)
+        topic_proportions_per_year = self._get_topic_proportions_per_year()
         for_df = []
         for year, topic_props in zip(self.years, topic_proportions_per_year):
             if merge_topics:
@@ -259,7 +297,7 @@ class TDMAnalysis:
         df = df.pivot(index='year', columns='topic_name', values='proportion')
         return df
 
-    def create_eurovoc_topic_term_map(self):
+    def _create_eurovoc_topic_term_map(self):
         eurovoc_topic_term_map = {}
         self.eurovoc_topic_docs = {}
         for term, topic in zip(self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner'], batch_size=256, n_process=11), self.eurovoc['MT'].apply(lambda x: x.lower())):
@@ -300,7 +338,7 @@ class TDMAnalysis:
         ## total terms in each topic (doc)
         ## number of docs that match term
         ## total number of docs
-        for topic in self.eurovoc_topic_docs:
+        for topic in self.eurovoc_topics:
             term_freq = Counter()
             curr_doc = self.eurovoc_topic_docs[topic]
             doc_len = len(self.eurovoc_topic_docs[topic])
@@ -332,32 +370,9 @@ class TDMAnalysis:
             except KeyError as e:
                 continue
         return self.tfidf_mat
-
-
-    def eurovoc_lookup(self, word, prob):
-        """
-        This function takes in a word and its associated probability of
-        occurring within a particular DTM model topic (see get_words_for_topic).
-        The word is searched for in the eurovoc terms. Each term that has this
-        word as a substring is considered a MATCH. For each MATCH, the
-        EUROVOC_TOPIC associated with that term is incremented in a counter,
-        where the counter is incremented by the word's probability.
-
-        The intuition is that words with higher probability will weight the
-        EUROVOC_TOPIC more when deciding which EUROVOC_TOPIC to use to
-        categorise a dtm topic.
-
-        complicated explanation lol
-        """
-        c = Counter()
-        for idx, term in enumerate(self.eurovoc['TERMS (PT-NPT)'].apply(lambda x: x.lower())):
-            if re.search(f"(?:^|\\s){word}(?:\\s|$)", term):
-                ev_topic = self.eurovoc.loc[idx]['MT'].lower()
-                c[ev_topic] += prob
-        return c
     
     def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
-        c = Counter()
+        c = {}
         top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
         for topic in self.eurovoc_topics:
             score = 0
@@ -370,10 +385,11 @@ class TDMAnalysis:
                 tfidf = self.tfidf_mat[term_ind][topic_ind]
                 # weighting and tf-idf 
                 if tfidf_enabled:
+                    tmp = weight * tfidf
                     score = score + (weight * tfidf)
                 else:
                     score = score + weight
-            c.update({topic: score})
+            c[topic] = score
         return c
 
     def _get_embedding_scores(self, top_words):
@@ -529,18 +545,23 @@ class TDMAnalysis:
         Gets the top words for each topic within the DTM model being analysed.
         """
         self.top_word_arr = []
+        weighted = kwargs.get("weighted")
+        proportions = None
+        if weighted:
+            proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
         for i in range(self.ntopics):
             word_dist_arr = self.get_topic_word_distributions_ot(i)
-            self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, **kwargs))
+            _proportions = np.array(proportions[:,i]) if type(proportions) == np.ndarray else None
+            self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, timestep_proportions=_proportions, **kwargs))
         return self.top_word_arr
 
-    def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True):
+    def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True, weighted=True, timestep_proportions=None):
         """
         This function takes in an NUM_YEARSxLEN_VOCAB array/matrix that
         represents the vocabulary distribution for each year a topic is
-        calculated. It returns a list of the n most probable words for that
+        fit. It returns a list of the n most probable words for that
         particular topic and optionally their summed probabilities over all
-        years.
+        years. These probabilities can be weighted or unweighted.
 
         Args: 
 
@@ -557,7 +578,18 @@ class TDMAnalysis:
         Returns: Either a list of strings or a list of tuples (float, string)
         representing the summed probability of a particular word.
         """
-        acc = np.sum(word_dist_arr_ot, axis=0)
+        if weighted and not type(timestep_proportions) == np.ndarray:
+            print("need to specify the timestep proportions to use in weighting with timestep_proportions attribute.")
+            sys.exit(1)
+        elif weighted:
+            assert timestep_proportions.shape[0] == word_dist_arr_ot.shape[0]
+            weighted_word_dist_acc = np.zeros(word_dist_arr_ot.shape)
+            logged_word_dist_arr_ot = np.log(word_dist_arr_ot)
+            for i in range(len(logged_word_dist_arr_ot)):
+                np.copyto(weighted_word_dist_acc[i], np.exp(timestep_proportions[i] + logged_word_dist_arr_ot[i]))
+            acc = np.sum(weighted_word_dist_acc, axis=0)
+        else:
+            acc = np.sum(word_dist_arr_ot, axis=0)
         word_dist_arr_sorted = acc.argsort()
         if descending:
             word_dist_arr_sorted = np.flip(word_dist_arr_sorted)
@@ -584,7 +616,7 @@ class TDMAnalysis:
             print("Can't open", topic_file_path)
             raise Exception
         assert len(topic_word_distributions) == len(self.vocab) * len(self.years), print("WRONG VOCAB!!")
-
+        
         word_dist_arr = np.exp(np.reshape([float(x) for x in topic_word_distributions], (len(self.vocab), len(self.years))).T)
         return word_dist_arr
 
@@ -723,14 +755,16 @@ if __name__ == "__main__":
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_last_20_years"),
-        doc_year_map_file_name="model-year.dat",
-        seq_dat_file_name="model-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "greyroads_aeo_all_bigram"),
+        doc_year_map_file_name="greyroads-year.dat",
+        seq_dat_file_name="greyroads-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="k30_a0.01_var0.05",
-        eurovoc_whitelist=False,
+        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
+        eurovoc_whitelist=True,
         )
-    topic_names = tdma.get_topic_names(_type="embedding")
+    tdma._init_eurovoc(EUROVOC_PATH)
+    res = tdma.get_top_words(weighted=True)
+    # res = tdma._get_baseline_topic_vectors(simple=False, zeroed=True)
     breakpoint()
+    # topic_names = tdma.get_topic_names(_type="embedding")
     print("he")
-    # res = tdma._get_baseline_topic_vectors(simple=False)
