@@ -437,9 +437,11 @@ class TDMAnalysis:
         """
         topic_vectors = []
         topic_indices = indices if indices else sorted(self.eurovoc_topics)
+        topic_proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
-            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
+            topic_proportions_ot = np.array(topic_proportions[:,i])
+            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
             self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
             model_ev_scores = self.get_auto_topic_name(top_words, i, stringify=False, tfidf_enabled=False, return_raw_scores=True)
             topic_vectors.append([model_ev_scores[i] for i in topic_indices])
@@ -525,9 +527,12 @@ class TDMAnalysis:
         self._init_eurovoc(EUROVOC_PATH)
         topic_names = {} if detailed else []
         self.top_word_arr = []
+        proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
-            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True)
+            topic_proportions_ot = np.array(proportions[:,i])
+            # we want to weight our top words by the topic proportions, so weighted=True
+            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
             # add top words to class object
             self.top_word_arr.append(top_words)
             if _type == "tfidf":
@@ -762,8 +767,9 @@ if __name__ == "__main__":
         model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
         eurovoc_whitelist=True,
         )
-    tdma._init_eurovoc(EUROVOC_PATH)
-    res = tdma.get_top_words(weighted=True)
+    # tdma._init_eurovoc(EUROVOC_PATH)
+    w_top_words = tdma.get_top_words(weighted=True)
+    uw_top_words = tdma.get_top_words(weighted=False)
     # res = tdma._get_baseline_topic_vectors(simple=False, zeroed=True)
     breakpoint()
     # topic_names = tdma.get_topic_names(_type="embedding")
