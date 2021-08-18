@@ -16,8 +16,8 @@ from multiprocessing import Pool
 from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
 
 # bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS.txt")
-ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS.txt")
+bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS_LG.txt")
+ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS_LG.txt")
 SEED = 42
 
 
@@ -203,7 +203,8 @@ class DTMCreator:
             us_upper_limit=200,
             enable_downsampling=False, 
             enable_upsampling=False,
-            ngrams=False
+            ngrams=False,
+            basic=False
         ):
         """This function takes the spaCy documents found in this classes rdocs attribute and preprocesses them.
         The preprocessing pipeline tokenises each document and removes:
@@ -231,6 +232,7 @@ class DTMCreator:
             enable_downsampling (bool, optional): Whether or not downsampling is enabled. Defaults to False.
             enable_upsampling (bool, optional): Whether or not upsampling is enabled. Defaults to False.
             ngrams (bool, optional): Whether to add ngrams instead of just bigrams. Relies on self.bigrams to be True to have any effect. Defaults to False.
+            basic (bool, optional): Whether to just undertake the basic preprocessing step to create the paras_processed list only. Defaults to False.
         """
         if self.bigram:
             print("adding bigrams...")
@@ -260,12 +262,13 @@ class DTMCreator:
                         words.append(w.lemma_.lower().replace(" ", "_"))
                 sents.append(words)
             self.paras_processed.append(sents)
+        if basic:
+            return self.paras_processed
         # count words
         for d in self.paras_processed:
             for s in d:
                 for w in s:
                     self.wcounts[w]+=1           
-
         # PREPROCESS: keep tokens that occur at least min_freq times
         self.wcounts = {k:v for k,v in self.wcounts.items() if v>min_freq} 
 
