@@ -34,17 +34,19 @@ def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
         if not os.path.isdir(model_topic_analysis_save_dir):
             os.mkdir(model_topic_analysis_save_dir)
         # get the top 10 topic words for all time
-        topic_names = coh.get_topic_names()
+        topic_names = coh.get_topic_names(detailed=True)
         with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp:
             for i in range(len(topic_names)):
-                word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
-                topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
-                fp.write(f"topic {i} ({topic_names[i]})\n{topic_top_terms}\n==========\n")
+                topic_name, topic_top_terms = topic_names[i]
+                # word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
+                # topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
+                fp.write(f"topic {i} ({topic_name})\n{topic_top_terms}\n==========\n")
         # get the top 10 topic words for each topic over time
         with open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp:
             for i in range(len(topic_names)):
                 topw_df = coh.create_top_words_df()
-                fp.write(f"\n=========\ntopic {i} ({topic_names[i]})\n=========\n\n")
+                topic_name, topic_top_terms = topic_names[i]
+                fp.write(f"\n=========\ntopic {i} ({topic_name})\n=========\n\n")
                 top_words_for_topic = topw_df[topw_df['topic_idx'] == i].loc[:, ['year', 'top_words']]
                 for row in top_words_for_topic.itertuples():
                     fp.write(f"{row.year}\t{row.top_words}\n")
@@ -148,9 +150,9 @@ def hansard_analyse_multi_models():
         #     "bigram": True,
         # },
         {
-            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a_last_20_years"),
-            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a_last_20_years.csv"),
-            "ndocs": 7317,
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_2a_ngram"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
+            "ndocs": 15457,
             "bigram": True,
         },
         # {
@@ -179,12 +181,12 @@ def hansard_analyse_multi_models():
                 seq_dat_file_name="model-seq.dat",
                 vocab_file_name="vocab.txt",
                 model_out_dir=model,
-                eurovoc_whitelist=False
+                eurovoc_whitelist=True
             )
             print("initialising coherence...")
             coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
             print("done! analysing...")
-            analyse(coh, ds, model, coherences, coherence=False, terms=False)
+            analyse(coh, ds, model, coherences, coherence=False)
 
 def validate_multi_models():
     greyroads_datasets = [
