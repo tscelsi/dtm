@@ -3,3 +3,6 @@ dataset_*
 dtm/
 __pycache__/
 runs.json
+figures/
+datasets/
+log/

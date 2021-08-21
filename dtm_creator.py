@@ -5,6 +5,7 @@
 import pandas as pd
 import os
 import spacy
+import re
 from spacy.util import filter_spans
 from spacy.tokens import Token
 from numpy import random
@@ -15,13 +16,17 @@ import json
 from multiprocessing import Pool
 from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
 
-# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS_LG.txt")
-ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS_LG.txt")
+preproc_ngram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "NGRAMS_PROC.txt")
+bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
+# bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS_LG.txt")
+# ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS_LG.txt")
 SEED = 42
 
 
 class DTMCreator:
+    
+    term_blacklist = None
+    
     def __init__(
         self, 
         model_root, 
@@ -151,6 +156,44 @@ class DTMCreator:
             new_paras.append(para)
         self.rdocs = new_paras
 
+    def _substitute_ngrams(self, doc, ngrams, replace):
+        ngrammed_doc = []
+        for sent in doc:
+            ngrammed_sent = " ".join(sent)
+            for ngram_patt in ngrams:
+                ngrammed_sent = ngrammed_sent.replace(ngram_patt, f' {ngram_patt.strip().replace(" ", "_")} ')
+            # edge cases are start and end of sent or sent is whole ngram
+            for ngram_patt in ngrams:
+                ngram = ngram_patt.strip()
+                if ngrammed_sent.startswith(ngram):
+                    ngrammed_sent = re.sub(r'^%s ' % ngram, r'%s ' % ngram.replace(" ", "_"), ngrammed_sent)
+                if ngrammed_sent.endswith(ngram):
+                    ngrammed_sent = re.sub(r' %s$' % ngram, r' %s' % ngram.replace(" ", "_"), ngrammed_sent)
+                if ngrammed_sent == ngram:
+                    ngrammed_sent = ngrammed_sent.replace(" ", "_")
+                    break
+            split_sent = ngrammed_sent.split(" ")
+            if self.term_blacklist:
+                split_sent = [x for x in split_sent if x not in self.term_blacklist and x != ""]
+            ngrammed_doc.append(split_sent)
+        return ngrammed_doc
+
+    def _add_ngrams3(self):
+        """
+        ['here', 'is', 'new', 'south', 'wales']
+        match with ngram 'new south wales'
+        """
+        def replace(match):
+            string = f" {match.group(1).replace(' ', '_')} "
+            self.ngram_matched_patterns[string.strip()] += 1
+            return string
+        ngram_patterns = [re.compile(r"(?:\s|^)(%s)(?:\s|$)" % x.strip('\n')) for x in sorted([y for y in open(preproc_ngram_path, "r").readlines()], key=lambda x: len(x), reverse=True)]
+        ngram_strings = [" %s " % x.strip('\n') for x in sorted([y for y in open(preproc_ngram_path, "r").readlines()], key=lambda x: len(x), reverse=True)]
+        self.ngram_matched_patterns = Counter()
+        ngrammed_docs = [self._substitute_ngrams(doc, ngram_strings, replace) for doc in self.paras_processed]
+        self.paras_processed = ngrammed_docs
+        return self.ngram_matched_patterns
+
     def _get_year_batches(self, years_list=None):
         years = years_list if years_list else self.rdates
         year_mapping = {}
@@ -234,9 +277,6 @@ class DTMCreator:
             ngrams (bool, optional): Whether to add ngrams instead of just bigrams. Relies on self.bigrams to be True to have any effect. Defaults to False.
             basic (bool, optional): Whether to just undertake the basic preprocessing step to create the paras_processed list only. Defaults to False.
         """
-        if self.bigram:
-            print("adding bigrams...")
-            self._add_bigrams(ngrams=ngrams)
         self.paras_processed = []
         wids = {}
         wids_rev = {}
@@ -262,6 +302,10 @@ class DTMCreator:
                         words.append(w.lemma_.lower().replace(" ", "_"))
                 sents.append(words)
             self.paras_processed.append(sents)
+        if self.bigram:
+            print("adding bigrams...")
+            matches = self._add_ngrams3()
+            # self._add_bigrams(ngrams=ngrams)
         if basic:
             return self.paras_processed
         # count words
@@ -503,6 +547,22 @@ def fit_one():
     outpath = os.path.join(model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
     fit(run, model_root_dir=model_root_dir, outpath=outpath)
 
+def preprocess_ngrams():
+    ngrams = [(x.strip().lower(),0) for x in open("../NGRAMS.txt").readlines()]
+    dtm = DTMCreator("", ngrams, "", "", bigram=False, shuffle=False)
+    docs = dtm.preprocess_paras(basic=True)
+    joined_docs = []
+    for d in docs:
+        doc = []
+        for s in d:
+            doc.extend(s)
+        if len(doc) > 1:
+            joined_docs.append(doc)
+    joined_docs = [" ".join(x) for x in joined_docs]
+    with open("NGRAMS_PROC.txt", "w+") as fp:
+        for ngram in sorted(joined_docs):
+            fp.write(ngram+'\n')
+
 if __name__ == "__main__":
     # the path to the directory that you want all the files saved in, e.g. *-mult.dat, *-seq.dat, vocab.txt, etc.
     # model_root = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram")
@@ -511,5 +571,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_2"))
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_2a_ngram"))
     # fit_one()
