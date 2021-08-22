@@ -15,17 +15,16 @@ from collections import defaultdict, Counter
 import json
 from multiprocessing import Pool
 from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
+from preprocessing import Preprocessing
 
-preproc_ngram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "NGRAMS_PROC.txt")
-bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
-# bigram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "BIGRAMS_LG.txt")
-# ngram_path = os.path.join(os.environ['ROADMAP_SCRAPER'], "NGRAMS_LG.txt")
+# preproc_ngram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "NGRAMS_PROC.txt")
+# bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
 SEED = 42
 
 
 class DTMCreator:
     
-    term_blacklist = None
+    term_blacklist = []
     
     def __init__(
         self, 
@@ -101,99 +100,6 @@ class DTMCreator:
         """
         raise NotImplementedError
 
-    def _add_bigrams(self, ngrams=False):
-        """This function retokenises spaCy documents to include bigrams (and ngrams if ngrams enabled) instead of just
-        single word tokens. It does this by referencing a corpus of pre-computed ngrams and finding matches of these ngrams
-        in the corpus using the spaCy PhraseMatcher class. Take a paragraph:
-
-        "The cat realised that climate change was important."
-
-        In the above sentence, we may have the phrase 'climate change' in our ngram reference corpus. spaCy has initially tokenised the sentence as:
-
-        ['the', 'cat', 'realised', 'that', 'climate', 'change', 'was', 'important', '.']
-
-        We want to have spaCy pick up 'climate change' as a single bigram. Thus we use the PhraseMatcher to find it in the original sentence, and retokenise
-        it. Such that the above tokenisation becomes:
-
-        ['the', 'cat', 'realised', 'that', 'climate change', 'was', 'important', '.']
-
-        We change the 'LEMMA' property of each token to represent the underscore connected ngram. For the 'climate change' token:
-
-        tok.lemma_ = 'climate_change'
-
-        Args:
-            ngrams (bool, optional): If set to true, instead of using just bigrams from bigram_path, ngrams will be matched
-                as well based on the ngrams found at ngram_path. Defaults to False.
-        """
-        self.ngram_match_counts = Counter()
-        # read in ngram file
-        if ngrams:
-            bigrams = [x.strip("\n") for x in open(ngram_path, "r").readlines()]
-        else:
-            bigrams = [x.strip("\n") for x in open(bigram_path, "r").readlines()]
-        # init matcher with all the ngrams
-        bigram_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA")
-        for bigram in self.nlp.pipe(bigrams, n_process=11, batch_size=self.spacy_batch_size):
-            bigram_matcher.add(bigram.text,[bigram])
-        new_paras = []
-        count = 0
-        for para in self.rdocs:
-            if count % 1000 == 0:
-                print(f"para {count}")
-            count += 1
-            matches = bigram_matcher(para)
-            match_mapping = {para[start:end].lemma_:_id for _id, start, end in matches}
-            # we remove overlapping matches taking the longest match as the source of truth
-            # i.e. if we match 'climate change' and 'climate', we take 'climate change'.
-            filtered_spans = filter_spans([para[start:end] for _,start,end in matches])
-            if filtered_spans:
-                with para.retokenize() as r:
-                    for span in filtered_spans:
-                        _id = match_mapping[span.lemma_]
-                        match_replace_with = self.nlp.vocab.strings[_id].replace(" ", "_")
-                        r.merge(span, attrs={"LEMMA": match_replace_with})
-                        self.ngram_match_counts.update([self.nlp.vocab.strings[_id]])
-            new_paras.append(para)
-        self.rdocs = new_paras
-
-    def _substitute_ngrams(self, doc, ngrams, replace):
-        ngrammed_doc = []
-        for sent in doc:
-            ngrammed_sent = " ".join(sent)
-            for ngram_patt in ngrams:
-                ngrammed_sent = ngrammed_sent.replace(ngram_patt, f' {ngram_patt.strip().replace(" ", "_")} ')
-            # edge cases are start and end of sent or sent is whole ngram
-            for ngram_patt in ngrams:
-                ngram = ngram_patt.strip()
-                if ngrammed_sent.startswith(ngram):
-                    ngrammed_sent = re.sub(r'^%s ' % ngram, r'%s ' % ngram.replace(" ", "_"), ngrammed_sent)
-                if ngrammed_sent.endswith(ngram):
-                    ngrammed_sent = re.sub(r' %s$' % ngram, r' %s' % ngram.replace(" ", "_"), ngrammed_sent)
-                if ngrammed_sent == ngram:
-                    ngrammed_sent = ngrammed_sent.replace(" ", "_")
-                    break
-            split_sent = ngrammed_sent.split(" ")
-            if self.term_blacklist:
-                split_sent = [x for x in split_sent if x not in self.term_blacklist and x != ""]
-            ngrammed_doc.append(split_sent)
-        return ngrammed_doc
-
-    def _add_ngrams3(self):
-        """
-        ['here', 'is', 'new', 'south', 'wales']
-        match with ngram 'new south wales'
-        """
-        def replace(match):
-            string = f" {match.group(1).replace(' ', '_')} "
-            self.ngram_matched_patterns[string.strip()] += 1
-            return string
-        ngram_patterns = [re.compile(r"(?:\s|^)(%s)(?:\s|$)" % x.strip('\n')) for x in sorted([y for y in open(preproc_ngram_path, "r").readlines()], key=lambda x: len(x), reverse=True)]
-        ngram_strings = [" %s " % x.strip('\n') for x in sorted([y for y in open(preproc_ngram_path, "r").readlines()], key=lambda x: len(x), reverse=True)]
-        self.ngram_matched_patterns = Counter()
-        ngrammed_docs = [self._substitute_ngrams(doc, ngram_strings, replace) for doc in self.paras_processed]
-        self.paras_processed = ngrammed_docs
-        return self.ngram_matched_patterns
-
     def _get_year_batches(self, years_list=None):
         years = years_list if years_list else self.rdates
         year_mapping = {}
@@ -216,28 +122,6 @@ class DTMCreator:
         else:
             return new_years_list
 
-    def _add_bigrams2(self, n=None):
-        """
-        Occurs after preprocess_paras runs
-        """
-        if n == None:
-            # default is bi/trigram has to appear on in half of docs on avg.
-            n = len(self.paras_processed) / 20
-        bigram_measures = BigramAssocMeasures()
-        trigram_measures = TrigramAssocMeasures()
-        docs = []
-        for para in self.paras_processed:
-            for sent in para:
-                docs.append(sent)
-        bigram_finder = BigramCollocationFinder.from_documents(docs)
-        trigram_finder = TrigramCollocationFinder.from_documents(docs)
-        bigram_finder.apply_freq_filter(n)
-        trigram_finder.apply_freq_filter(n)
-        trigrams = trigram_finder.score_ngrams(trigram_measures.pmi)
-        bigrams = bigram_finder.score_ngrams(bigram_measures.pmi)
-
-        breakpoint()
-
     def preprocess_paras(
             self,
             min_freq=150, 
@@ -246,7 +130,7 @@ class DTMCreator:
             us_upper_limit=200,
             enable_downsampling=False, 
             enable_upsampling=False,
-            ngrams=False,
+            ngrams=True,
             basic=False
         ):
         """This function takes the spaCy documents found in this classes rdocs attribute and preprocesses them.
@@ -281,31 +165,8 @@ class DTMCreator:
         wids = {}
         wids_rev = {}
         self.wcounts = defaultdict(lambda:0)
-        for doc in self.rdocs:
-            sents = []
-            for s in doc.sents:
-                words = []
-                for w in s:
-                    # PREPROCESS: lemmatize
-                    # PREPROCESS: remove * puncuation
-                    #                    * words that are / contain numbers
-                    #                    * URLs
-                    #                    * stopwords
-                    #                    * words of length==1
-                    if not w.is_punct \
-                        and not w.is_space \
-                        and not w.like_num \
-                        and not any(i.isdigit() for i in w.lemma_) \
-                        and not w.like_url \
-                        and not w.text.lower() in STOP_WORDS \
-                        and len(w.lemma_) > 1:
-                        words.append(w.lemma_.lower().replace(" ", "_"))
-                sents.append(words)
-            self.paras_processed.append(sents)
-        if self.bigram:
-            print("adding bigrams...")
-            matches = self._add_ngrams3()
-            # self._add_bigrams(ngrams=ngrams)
+        p = Preprocessing(self.rdocs, term_blacklist=self.term_blacklist)
+        self.paras_processed = p.preprocess(ngrams=ngrams)
         if basic:
             return self.paras_processed
         # count words
@@ -448,10 +309,7 @@ class DTMCreator:
         outyear.close()
         outmult.close()
         outseq.close()
-
-    def create(self, min_freq=150, ds_lower_limit=1000):
-        self.preprocess_paras(min_freq=min_freq, write_vocab=True, ds_lower_limit=ds_lower_limit)
-        self.write_dtm()
+        
 
 
 def fit(run, model_root_dir, outpath):
@@ -547,22 +405,6 @@ def fit_one():
     outpath = os.path.join(model_root_dir, f"model_run_topics{run['topics']}_alpha{run['alpha']}_topic_var{run['topic_var']}")
     fit(run, model_root_dir=model_root_dir, outpath=outpath)
 
-def preprocess_ngrams():
-    ngrams = [(x.strip().lower(),0) for x in open("../NGRAMS.txt").readlines()]
-    dtm = DTMCreator("", ngrams, "", "", bigram=False, shuffle=False)
-    docs = dtm.preprocess_paras(basic=True)
-    joined_docs = []
-    for d in docs:
-        doc = []
-        for s in d:
-            doc.extend(s)
-        if len(doc) > 1:
-            joined_docs.append(doc)
-    joined_docs = [" ".join(x) for x in joined_docs]
-    with open("NGRAMS_PROC.txt", "w+") as fp:
-        for ngram in sorted(joined_docs):
-            fp.write(ngram+'\n')
-
 if __name__ == "__main__":
     # the path to the directory that you want all the files saved in, e.g. *-mult.dat, *-seq.dat, vocab.txt, etc.
     # model_root = os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram")
@@ -571,5 +413,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_2a_ngram"))
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_all_ngram"))
     # fit_one()
