@@ -4,7 +4,7 @@ from coherence import CoherenceAnalysis
 from pprint import pprint
 
 def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
-    analysis_save_dir = os.path.join(ds['model_root'],"analysis_all_eurovoc_topics")
+    analysis_save_dir = os.path.join(ds['model_root'],"analysis_whitelist_eurovoc_topics")
     if not os.path.isdir(analysis_save_dir):
         os.mkdir(analysis_save_dir)
     if plot:
@@ -34,19 +34,21 @@ def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
         if not os.path.isdir(model_topic_analysis_save_dir):
             os.mkdir(model_topic_analysis_save_dir)
         # get the top 10 topic words for all time
-        topic_names = coh.get_topic_names(detailed=True)
+        tfidf_topic_names = coh.get_topic_names(detailed=True)
+        emb_topic_names = coh.get_topic_names(detailed=True, _type="embedding")
         with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp:
-            for i in range(len(topic_names)):
-                topic_name, topic_top_terms = topic_names[i]
+            for i in range(len(tfidf_topic_names)):
+                tfidf_topic_name, topic_top_terms = tfidf_topic_names[i]
                 # word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
                 # topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
-                fp.write(f"topic {i} ({topic_name})\n{topic_top_terms}\n==========\n")
+                fp.write(f"tfidf topic {i} labels: ({tfidf_topic_name})\n{topic_top_terms}\n==========\n")
         # get the top 10 topic words for each topic over time
         with open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp:
-            for i in range(len(topic_names)):
+            for i in range(len(tfidf_topic_names)):
                 topw_df = coh.create_top_words_df()
-                topic_name, topic_top_terms = topic_names[i]
-                fp.write(f"\n=========\ntopic {i} ({topic_name})\n=========\n\n")
+                tfidf_topic_name, topic_top_terms = tfidf_topic_names[i]
+                emb_topic_name, _ = emb_topic_names[i]
+                fp.write(f"\n=========\ntfidf topic {i} labels: ({tfidf_topic_name})\nemb topic {i} labels: ({emb_topic_name})\n=========\n\n")
                 top_words_for_topic = topw_df[topw_df['topic_idx'] == i].loc[:, ['year', 'top_words']]
                 for row in top_words_for_topic.itertuples():
                     fp.write(f"{row.year}\t{row.top_words}\n")
@@ -60,24 +62,40 @@ def analyse_model():
     }
     MODEL_NAME = "model_run_topics30_alpha0.01_topic_var0.05"
     coherences = {}
+    # coh = CoherenceAnalysis(
+    #             dataset['data_path'],
+    #             "journals",
+    #             "section_txt",
+    #             "date",
+    #             dataset['bigram'],
+    #             dataset.get("limit"),
+    #             dataset['ndocs'], 
+    #             int(MODEL_NAME.split("_")[2].split("topics")[1]), 
+    #             model_root=dataset['model_root'],
+    #             doc_year_map_file_name="eiajournal-year.dat",
+    #             seq_dat_file_name="eiajournal-seq.dat",
+    #             vocab_file_name="vocab.txt",
+    #             model_out_dir=MODEL_NAME,
+    #             eurovoc_whitelist=False
+    #         )
     coh = CoherenceAnalysis(
-                dataset['data_path'],
-                "journals",
-                "section_txt",
-                "date",
+                None,
+                "reverse",
+                None,
+                None,
                 dataset['bigram'],
                 dataset.get("limit"),
                 dataset['ndocs'], 
-                int(MODEL_NAME.split("_")[2].split("topics")[1]), 
+                int(MODEL_NAME.split("_")[2].split("topics")[1]),
                 model_root=dataset['model_root'],
-                doc_year_map_file_name="eiajournal-year.dat",
-                seq_dat_file_name="eiajournal-seq.dat",
+                doc_year_map_file_name="greyroads-year.dat",
+                seq_dat_file_name="greyroads-seq.dat",
                 vocab_file_name="vocab.txt",
                 model_out_dir=MODEL_NAME,
-                eurovoc_whitelist=False
+                eurovoc_whitelist=True
             )
-    coh.init_coherence()
-    analyse(coh, dataset, MODEL_NAME, coherences)
+    # coh.init_coherence()
+    analyse(coh, dataset, MODEL_NAME, coherences, coherence=False)
 
 def journals_analyse_multi_models():
     datasets = [
@@ -89,9 +107,9 @@ def journals_analyse_multi_models():
         #     "downsample_limit": 500
         # },
         {
-            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_2"),
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_all_ngram"),
             "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "ndocs": 24323,
+            "ndocs": 24321,
             "bigram": True,
         }
     ]
@@ -104,10 +122,10 @@ def journals_analyse_multi_models():
         for model in df_models:
             print(f"analysing model {model}")
             coh = CoherenceAnalysis(
-                ds['data_path'],
-                "journals",
-                'section_txt',
-                'date',
+                None,
+                "reverse",
+                None,
+                None,
                 ds['bigram'],
                 ds.get("limit"),
                 ds['ndocs'], 
@@ -117,10 +135,10 @@ def journals_analyse_multi_models():
                 seq_dat_file_name="model-seq.dat",
                 vocab_file_name="vocab.txt",
                 model_out_dir=model,
-                eurovoc_whitelist=False
+                eurovoc_whitelist=True
             )
-            coh.init_coherence()
-            analyse(coh, ds, model, coherences)
+            # coh.init_coherence()
+            analyse(coh, ds, model, coherences, coherence=False, terms=False)
 
 
 def hansard_analyse_multi_models():
@@ -186,6 +204,45 @@ def hansard_analyse_multi_models():
             print("initialising coherence...")
             coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
             print("done! analysing...")
+            analyse(coh, ds, model, coherences, coherence=False)
+
+def greyroads_analyse_multi_models():
+    datasets = [
+        {
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_aeo_all_ngram"),
+            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all.csv"),
+            "ndocs": 2446,
+            "bigram": True
+        },
+        {
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_ieo_all_ngram"),
+            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all.csv"),
+            "ndocs": 1094,
+            "bigram": True
+        }
+    ]
+    for ds in datasets:
+        dirs = os.listdir(ds['model_root'])
+        df_models = [x for x in dirs if x.startswith("k")]
+        coherences = {}
+        for model in df_models:
+            coh = CoherenceAnalysis(
+                None,
+                "reverse",
+                None,
+                None,
+                ds['bigram'],
+                ds.get("limit"),
+                ds['ndocs'], 
+                int(model.split("_")[0].split("k")[1]), 
+                model_root=ds['model_root'],
+                doc_year_map_file_name="model-year.dat",
+                seq_dat_file_name="model-seq.dat",
+                vocab_file_name="vocab.txt",
+                model_out_dir=model,
+                eurovoc_whitelist=True
+            )
+            # coh.init_coherence()
             analyse(coh, ds, model, coherences, coherence=False)
 
 def validate_multi_models():
@@ -292,6 +349,6 @@ def validate_multi_models():
 if __name__ == "__main__":
     # greyroads_analyse_multi_models()
     # validate_multi_models()
-    hansard_analyse_multi_models()
-    # journals_analyse_multi_models()
+    # hansard_analyse_multi_models()
+    journals_analyse_multi_models()
     # analyse_model()
