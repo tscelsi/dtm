@@ -176,6 +176,9 @@ class TDMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
+    def save_gammas(self, save_path="p_topic_document.csv"):
+        self.doc_topic_gammas.to_csv(save_path)
+
     def _create_eurovoc_embedding_matrix(self):
         """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
         T_k is the number of terms for a eurovoc label k and gloVedims is the dimensions of the pre-trained gloVe word embeddings as per gensim docs.
@@ -522,9 +525,6 @@ class TDMAnalysis:
         """
         
         """
-        if stringify == False and detailed == True:
-            print("Can't have detailed topic names without being stringified, check kwargs")
-            sys.exit(1)
         if isinstance(self.eurovoc, type(None)):
             self._init_eurovoc(EUROVOC_PATH)
         topic_names = []
@@ -659,20 +659,22 @@ class TDMAnalysis:
             print(f"{year}\t{top_words}")
             print("-----")
     
-    def _get_sorted_columns(self, df):
-        
+    def _get_sorted_columns(self, df, sort_by="peak_pos"):
         # sort according to position of peak
         sel2 = df.copy()
-        sel2.loc['peak_pos'] = [sel2[topic].idxmax() for topic in sel2.columns]
-        sel2 = sel2.sort_values(by='peak_pos', axis=1)
-        sel2 = sel2.drop('peak_pos')
-        return sel2.columns
+        if sort_by == 'peak_pos':
+            sel2.loc['peak_pos'] = [sel2[topic].idxmax() for topic in sel2.columns]
+            sel2 = sel2.sort_values(by='peak_pos', axis=1)
+            sel2 = sel2.drop('peak_pos')
+            return sel2.columns
+        else:
+            return pd.Index([str(y) for y in sorted([int(x) for x in df.columns])])
     
-    def plot_topics_ot(self, save_path, include_names=False, save=True):
-        df_scores = self.create_plottable_topic_proportion_ot_df(include_names=include_names)
+    def plot_topics_ot(self, save_path, save=True, sort_by="peak_pos"):
+        df_scores = self.create_plottable_topic_proportion_ot_df(include_names=False)
         for i in df_scores.index:
             df_scores.loc[i] = df_scores.loc[i] / df_scores.loc[i].sum() * 100
-        sorted_selection = self._get_sorted_columns(df_scores)
+        sorted_selection = self._get_sorted_columns(df_scores, sort_by)
         plt = time_evolution_plot(df_scores[sorted_selection], save_path, scale=0.5, save=save)
         return plt
 
@@ -722,28 +724,19 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 2447 # number of lines in -mult.dat file.
+    NDOCS = 17064 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "greyroads_aeo_all_bigram"),
-        doc_year_map_file_name="greyroads-year.dat",
-        seq_dat_file_name="greyroads-seq.dat",
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_labor_min_freq_80"),
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="model_run_topics30_alpha0.01_topic_var0.05",
+        model_out_dir="k30_a0.01_var0.1",
         eurovoc_whitelist=True,
         )
     tdma._init_eurovoc(EUROVOC_PATH)
-    # w_top_words = tdma.get_top_words(weighted=True)
-    # uw_top_words = tdma.get_top_words(weighted=False)
-    # res = tdma._get_baseline_topic_vectors(simple=False, zeroed=True)
-    # emb_topic_names = tdma.get_topic_names(_type="embedding")
-    # with open("quick_topic_names.txt", "w+") as fp:
-    #     for tn in emb_topic_names:
-    #         fp.write(str(tn)+"\n")
-    tdma.plot_topics_ot("help.png")
+    tdma.save_gammas()
     breakpoint()
-    # tfidf_topic_names = tdma.get_topic_names(_type="tfidf")
-    # breakpoint()
     print("he")

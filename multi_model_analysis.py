@@ -3,15 +3,21 @@ import pandas as pd
 from coherence import CoherenceAnalysis
 from pprint import pprint
 
-def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
+def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True, document_topic_dist=True):
     analysis_save_dir = os.path.join(ds['model_root'],"analysis_whitelist_eurovoc_topics")
+    # topic_analysis_save_dir = os.path.join(analysis_save_dir, "topic_analysis")
+    model_topic_analysis_save_dir = os.path.join(analysis_save_dir, model)
     if not os.path.isdir(analysis_save_dir):
         os.mkdir(analysis_save_dir)
+    if not os.path.isdir(model_topic_analysis_save_dir):
+        os.mkdir(model_topic_analysis_save_dir)
+    if document_topic_dist:
+        coh.save_gammas(os.path.join(model_topic_analysis_save_dir, "doc_topic_distribution.csv"))
     if plot:
     # plot the topic distributions over time for this model
         print("plotting topics...")
         try:
-            coh.plot_topics_ot(os.path.join(analysis_save_dir, f"{model}.png"))
+            coh.plot_topics_ot(os.path.join(model_topic_analysis_save_dir, f"{model}.png"), sort_by="columns")
         except Exception as e:
             print(f"plot failed for model: {model}")
     if coherence:
@@ -27,12 +33,6 @@ def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True):
             for k,v in coherences.items():
                 fp.write(f"{k}\t{v['pmi']}\t{v['npmi']}\n")
     if terms:
-        topic_analysis_save_dir = os.path.join(analysis_save_dir, "topic_analysis")
-        if not os.path.isdir(topic_analysis_save_dir):
-            os.mkdir(topic_analysis_save_dir)
-        model_topic_analysis_save_dir = os.path.join(topic_analysis_save_dir, model)
-        if not os.path.isdir(model_topic_analysis_save_dir):
-            os.mkdir(model_topic_analysis_save_dir)
         # get the top 10 topic words for all time
         tfidf_topic_names = coh.get_topic_names(detailed=True)
         emb_topic_names = coh.get_topic_names(detailed=True, _type="embedding")
@@ -143,48 +143,38 @@ def journals_analyse_multi_models():
 
 def hansard_analyse_multi_models():
     datasets = [
-        # {
-        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a"),
-        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
-        #     "ndocs": 15457,
-        #     "bigram": True,
-        # },
-        # {
-        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2b"),
-        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2b.csv"),
-        #     "ndocs": 14519,
-        #     "bigram": True,
-        # },
-        # {
-        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2c"),
-        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2c.csv"),
-        #     "ndocs": 15457,
-        #     "bigram": True,
-        # },
-        # {
-        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2d"),
-        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2d.csv"),
-        #     "ndocs": 16174,
-        #     "bigram": True,
-        # },
+        {
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_greens_1990_2021_min_freq_40"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_so_300t_Greens.csv"),
+            "bigram": True,
+        },
+        {
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_liberal_min_freq_80"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_so_300t_Liberal.csv"),
+            "bigram": True,
+        },
+        {
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_labor_min_freq_80"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "04_model_inputs", "coal_so_300t_Labor.csv"),
+            "bigram": True,
+        },
+        {
+            "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_2a_last_20_years_ngram"),
+            "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a_last_20_years.csv"),
+            "bigram": True,
+        },
         {
             "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_2a_ngram"),
             "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
-            "ndocs": 15457,
             "bigram": True,
         },
-        # {
-        #     "model_root": os.path.join(os.environ['DTM_ROOT'], "dtm", "dataset_2a"),
-        #     "data_path": os.path.join(os.environ['HANSARD'],"coal_data", "06_dtm", "dataset_2a.csv"),
-        #     "ndocs": 15457,
-        #     "bigram": True,
-        # }
     ]
     for ds in datasets:
         dirs = os.listdir(ds['model_root'])
         df_models = [x for x in dirs if x.startswith("k")]
         coherences = {}
         for model in df_models:
+            ndocs = sum([int(x) for x in open(os.path.join(ds['model_root'], 'model-seq.dat')).readlines()[1:]])
             coh = CoherenceAnalysis(
                 None,
                 "reverse",
@@ -192,7 +182,7 @@ def hansard_analyse_multi_models():
                 None,
                 ds['bigram'],
                 ds.get("limit"),
-                ds['ndocs'], 
+                ndocs, 
                 int(model.split("_")[0].split("k")[1]), 
                 model_root=ds['model_root'],
                 doc_year_map_file_name="model-year.dat",
@@ -201,9 +191,9 @@ def hansard_analyse_multi_models():
                 model_out_dir=model,
                 eurovoc_whitelist=True
             )
-            print("initialising coherence...")
-            coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
-            print("done! analysing...")
+            # print("initialising coherence...")
+            # coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
+            # print("done! analysing...")
             analyse(coh, ds, model, coherences, coherence=False)
 
 def greyroads_analyse_multi_models():
