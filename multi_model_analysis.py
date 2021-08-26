@@ -2,9 +2,10 @@ import os
 import pandas as pd
 from coherence import CoherenceAnalysis
 from pprint import pprint
+import re
 
-def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True, document_topic_dist=True):
-    analysis_save_dir = os.path.join(ds['model_root'],"analysis_whitelist_eurovoc_topics")
+def analyse(coh, ds, model, coherences, save_dir, plot=True, coherence=True, terms=True, document_topic_dist=True):
+    analysis_save_dir = save_dir
     # topic_analysis_save_dir = os.path.join(analysis_save_dir, "topic_analysis")
     model_topic_analysis_save_dir = os.path.join(analysis_save_dir, model)
     if not os.path.isdir(analysis_save_dir):
@@ -17,7 +18,7 @@ def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True, d
     # plot the topic distributions over time for this model
         print("plotting topics...")
         try:
-            coh.plot_topics_ot(os.path.join(model_topic_analysis_save_dir, f"{model}.png"), sort_by="columns")
+            coh.plot_topics_ot(os.path.join(model_topic_analysis_save_dir, f"{model}.png"))
         except Exception as e:
             print(f"plot failed for model: {model}")
     if coherence:
@@ -33,25 +34,23 @@ def analyse(coh, ds, model, coherences, plot=True, coherence=True, terms=True, d
             for k,v in coherences.items():
                 fp.write(f"{k}\t{v['pmi']}\t{v['npmi']}\n")
     if terms:
-        # get the top 10 topic words for all time
         tfidf_topic_names = coh.get_topic_names(detailed=True)
         emb_topic_names = coh.get_topic_names(detailed=True, _type="embedding")
-        with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp:
+        topw_df = coh.create_top_words_df(n=30)
+        with open(os.path.join(model_topic_analysis_save_dir, "all_topics_top_terms.txt"), "w") as fp1, \
+            open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp2:
             for i in range(len(tfidf_topic_names)):
-                tfidf_topic_name, topic_top_terms = tfidf_topic_names[i]
-                # word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
-                # topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
-                fp.write(f"tfidf topic {i} labels: ({tfidf_topic_name})\n{topic_top_terms}\n==========\n")
-        # get the top 10 topic words for each topic over time
-        with open(os.path.join(model_topic_analysis_save_dir, f"all_topics_top_terms_ot.txt"), "w") as fp:
-            for i in range(len(tfidf_topic_names)):
-                topw_df = coh.create_top_words_df()
                 tfidf_topic_name, topic_top_terms = tfidf_topic_names[i]
                 emb_topic_name, _ = emb_topic_names[i]
-                fp.write(f"\n=========\ntfidf topic {i} labels: ({tfidf_topic_name})\nemb topic {i} labels: ({emb_topic_name})\n=========\n\n")
+                # word_dist_arr_ot = coh.get_topic_word_distributions_ot(i)
+                # topic_top_terms = coh.get_words_for_topic(word_dist_arr_ot, with_prob=False)
+                fp1.write(f"tfidf topic {i} labels: ({tfidf_topic_name})\n{topic_top_terms}\n==========\n")
+                fp2.write(f"\n=========\ntfidf topic {i} labels: ({tfidf_topic_name})\nemb topic {i} labels: ({emb_topic_name})\n=========\n\n")
                 top_words_for_topic = topw_df[topw_df['topic_idx'] == i].loc[:, ['year', 'top_words']]
                 for row in top_words_for_topic.itertuples():
-                    fp.write(f"{row.year}\t{row.top_words}\n")
+                    fp2.write(f"{row.year}\t{row.top_words}\n")
+                
+                
 
 def analyse_model():
     dataset = {
@@ -99,19 +98,26 @@ def analyse_model():
 
 def journals_analyse_multi_models():
     datasets = [
-        # {
-        #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram_downsampled_500"),
-        #     "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-        #     "ndocs": 9878,
-        #     "bigram": True,
-        #     "downsample_limit": 500
-        # },
         {
             "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_all_ngram"),
             "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
-            "ndocs": 24321,
             "bigram": True,
-        }
+        },
+        # {
+        #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_ngram_min_freq_50"),
+        #     "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_biofuels.csv"),
+        #     "bigram": True,
+        # },
+        # {
+        #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_coal_ngram_min_freq_50"),
+        #     "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_coal.csv"),
+        #     "bigram": True,
+        # },
+        # {
+        #     "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_solar_ngram_min_freq_50"),
+        #     "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract_solar.csv"),
+        #     "bigram": True,
+        # }
     ]
     for ds in datasets:
         print("=========")
@@ -119,6 +125,7 @@ def journals_analyse_multi_models():
         dirs = os.listdir(ds['model_root'])
         df_models = [x for x in dirs if x.startswith("k")]
         coherences = {}
+        ndocs = sum([int(x) for x in open(os.path.join(ds['model_root'], 'model-seq.dat')).readlines()[1:]])
         for model in df_models:
             print(f"analysing model {model}")
             coh = CoherenceAnalysis(
@@ -128,7 +135,7 @@ def journals_analyse_multi_models():
                 None,
                 ds['bigram'],
                 ds.get("limit"),
-                ds['ndocs'], 
+                ndocs,
                 int(model.split("_")[0].split("k")[1]), 
                 model_root=ds['model_root'],
                 doc_year_map_file_name="model-year.dat",
@@ -138,7 +145,65 @@ def journals_analyse_multi_models():
                 eurovoc_whitelist=True
             )
             # coh.init_coherence()
-            analyse(coh, ds, model, coherences, coherence=False, terms=False)
+            analyse(coh, ds, model, coherences, coherence=False)
+
+
+def analyse_multi_models(root_save_dir=os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "analysis")):
+    if not os.path.isdir(root_save_dir):
+        os.mkdir(root_save_dir)
+    datasets = [
+        {
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_all_ngram"),
+            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "journals", "journals_energy_policy_applied_energy_all_years_abstract.csv"),
+            "bigram": True,
+        },
+        {
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_aeo_all_ngram"),
+            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all.csv"),
+            "bigram": True
+        },
+        {
+            "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_ieo_all_ngram"),
+            "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all.csv"),
+            "bigram": True
+        }
+    ]
+    whitelist_k = [30]
+    whitelist_a = [0.01]
+    whitelist_var = [0.05]
+    for ds in datasets:
+        dirs = os.listdir(ds['model_root'])
+        df_models = [x for x in dirs if x.startswith("k")]
+        pattern = re.compile(r"k(?P<k>\d+)_a(?P<a>\d+\.\d+)_var(?P<var>\d+\.\d+)")
+        for model in df_models:
+            m = pattern.match(model)
+            k = int(m.group('k'))
+            a = float(m.group('a'))
+            var = float(m.group('var'))
+            if k not in whitelist_k or a not in whitelist_a or var not in whitelist_var:
+                continue
+            ndocs = sum([int(x) for x in open(os.path.join(ds['model_root'], 'model-seq.dat')).readlines()[1:]])
+            coh = CoherenceAnalysis(
+                None,
+                "reverse",
+                None,
+                None,
+                ds['bigram'],
+                ds.get("limit"),
+                ndocs, 
+                int(model.split("_")[0].split("k")[1]), 
+                model_root=ds['model_root'],
+                doc_year_map_file_name="model-year.dat",
+                seq_dat_file_name="model-seq.dat",
+                vocab_file_name="vocab.txt",
+                model_out_dir=model,
+                eurovoc_whitelist=True
+            )
+            model_dir = os.path.join(root_save_dir, ds['model_root'].split("/")[-1])
+            if not os.path.isdir(model_dir):
+                os.mkdir(model_dir)
+            save_dir = os.path.join(model_dir, "analysis_n30")
+            analyse(coh, ds, model, {}, save_dir, coherence=False, plot=False, document_topic_dist=False)
 
 
 def hansard_analyse_multi_models():
@@ -201,13 +266,11 @@ def greyroads_analyse_multi_models():
         {
             "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_aeo_all_ngram"),
             "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all.csv"),
-            "ndocs": 2446,
             "bigram": True
         },
         {
             "model_root": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "dtm", "datasets", "greyroads_ieo_all_ngram"),
             "data_path": os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all.csv"),
-            "ndocs": 1094,
             "bigram": True
         }
     ]
@@ -215,6 +278,7 @@ def greyroads_analyse_multi_models():
         dirs = os.listdir(ds['model_root'])
         df_models = [x for x in dirs if x.startswith("k")]
         coherences = {}
+        ndocs = sum([int(x) for x in open(os.path.join(ds['model_root'], 'model-seq.dat')).readlines()[1:]])
         for model in df_models:
             coh = CoherenceAnalysis(
                 None,
@@ -223,7 +287,7 @@ def greyroads_analyse_multi_models():
                 None,
                 ds['bigram'],
                 ds.get("limit"),
-                ds['ndocs'], 
+                ndocs, 
                 int(model.split("_")[0].split("k")[1]), 
                 model_root=ds['model_root'],
                 doc_year_map_file_name="model-year.dat",
@@ -232,8 +296,8 @@ def greyroads_analyse_multi_models():
                 model_out_dir=model,
                 eurovoc_whitelist=True
             )
-            # coh.init_coherence()
-            analyse(coh, ds, model, coherences, coherence=False)
+            coh.init_coherence(os.path.join(ds['model_root'], "model-mult.dat"), os.path.join(ds['model_root'], "vocab.txt"))
+            analyse(coh, ds, model, coherences, terms=False, document_topic_dist=False)
 
 def validate_multi_models():
     greyroads_datasets = [
@@ -340,5 +404,6 @@ if __name__ == "__main__":
     # greyroads_analyse_multi_models()
     # validate_multi_models()
     # hansard_analyse_multi_models()
-    journals_analyse_multi_models()
+    # journals_analyse_multi_models()
+    analyse_multi_models()
     # analyse_model()

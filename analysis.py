@@ -94,6 +94,10 @@ class TDMAnalysis:
         "6816 iron, steel and other metal industries": "Industrial"
     }
 
+    eurovoc_label_correction_map = {
+        "6626 soft energy": "6626 renewable energy"
+    }
+
 
     def __init__(
         self, 
@@ -240,6 +244,8 @@ class TDMAnalysis:
         if self.eurovoc_whitelist:
             m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_topics, axis=1)
             self.eurovoc = self.eurovoc[m]
+        corrected_labels = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_correction_map[x] if x in self.eurovoc_label_correction_map else x)
+        self.eurovoc['MT'] = corrected_labels
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
         self.eurovoc = self.eurovoc.set_index('index')
         self._create_eurovoc_label_term_map()
@@ -521,7 +527,7 @@ class TDMAnalysis:
             all_ev_topics.append(ev_topics)
         return all_ev_topics
 
-    def get_topic_names(self, detailed=False, stringify=True, tfidf_enabled=True, _type="tfidf"):
+    def get_topic_names(self, detailed=False, stringify=True, tfidf_enabled=True, _type="tfidf", raw=False, n=10):
         """
         
         """
@@ -534,12 +540,12 @@ class TDMAnalysis:
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
             topic_proportions_ot = np.array(proportions[:,i])
             # we want to weight our top words by the topic proportions, so weighted=True
-            top_words = self.get_words_for_topic(word_dist_arr_ot, n=10, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
+            top_words = self.get_words_for_topic(word_dist_arr_ot, n=n, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
             # add top words to class object
             self.top_word_arr.append(top_words)
             if _type == "tfidf":
                 self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
-            curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled, score_type=_type)
+            curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled, score_type=_type, return_raw_scores=raw)
             if detailed:
                 topic_names.append((curr_topic_name, top_words))
             else:
@@ -552,14 +558,11 @@ class TDMAnalysis:
         Gets the top words for each topic within the DTM model being analysed.
         """
         self.top_word_arr = []
-        weighted = kwargs.get("weighted")
-        proportions = None
-        if weighted:
-            proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
+        proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
         for i in range(self.ntopics):
             word_dist_arr = self.get_topic_word_distributions_ot(i)
-            _proportions = np.array(proportions[:,i]) if type(proportions) == np.ndarray else None
-            self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, timestep_proportions=_proportions, **kwargs))
+            _proportions = np.array(proportions[:,i])
+            self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, timestep_proportions=_proportions, weighted=True, **kwargs))
         return self.top_word_arr
 
     def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True, weighted=True, timestep_proportions=None):
@@ -638,8 +641,8 @@ class TDMAnalysis:
                 break
             top_words_per_year = []
             for year_idx in range(0,len(self.years)):
-                # find top 10 most pertinent
-                topws = word_dist_arr[year_idx].argsort()[-10:]
+                # find top n most pertinent
+                topws = word_dist_arr[year_idx].argsort()[-n:]
                 topws = np.flip(topws)
                 # np.take_along_axis(word_dist_arr[0], topws, axis=0)
                 top_words = [self.index_to_word[i] for i in topws]
@@ -675,7 +678,7 @@ class TDMAnalysis:
         for i in df_scores.index:
             df_scores.loc[i] = df_scores.loc[i] / df_scores.loc[i].sum() * 100
         sorted_selection = self._get_sorted_columns(df_scores, sort_by)
-        plt = time_evolution_plot(df_scores[sorted_selection], save_path, scale=0.5, save=save)
+        plt = time_evolution_plot(df_scores[sorted_selection], save_path, scale=0.75, save=save)
         return plt
 
 def compare_coherences(dataset_root, analysis_folder):
@@ -724,12 +727,12 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 17064 # number of lines in -mult.dat file.
+    NDOCS = 2446 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_labor_min_freq_80"),
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "greyroads_aeo_all_ngram"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
@@ -737,6 +740,6 @@ if __name__ == "__main__":
         eurovoc_whitelist=True,
         )
     tdma._init_eurovoc(EUROVOC_PATH)
-    tdma.save_gammas()
+    # tdma.save_gammas()
     breakpoint()
     print("he")
