@@ -131,7 +131,8 @@ class DTMCreator:
             enable_downsampling=False, 
             enable_upsampling=False,
             ngrams=True,
-            basic=False
+            basic=False,
+            save_preproc=False
         ):
         """This function takes the spaCy documents found in this classes rdocs attribute and preprocesses them.
         The preprocessing pipeline tokenises each document and removes:
@@ -167,8 +168,14 @@ class DTMCreator:
         self.wcounts = defaultdict(lambda:0)
         p = Preprocessing(self.rdocs, term_blacklist=self.term_blacklist)
         self.paras_processed = p.preprocess(ngrams=ngrams)
+        if save_preproc:
+            df = self.df.copy()
+            df['preproc_text'] = self.paras_processed
+            df.to_csv(os.path.join(self.model_root, "preproc_df.csv"))
+            del df
         if basic:
             return self.paras_processed
+        
         # count words
         for d in self.paras_processed:
             for s in d:

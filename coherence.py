@@ -35,8 +35,6 @@ class CoherenceAnalysis(TDMAnalysis):
         else:
             print("init incorrect.")
             sys.exit(1)
-        print("creating top words df...")
-        self.top_words = self.create_top_words_df(n=20)
     
     def get_coherence(self, coherence='c_uci'):
         # topics = self.top_words[self.top_words['year'] == str(year)]['top_words'].tolist()
@@ -44,9 +42,10 @@ class CoherenceAnalysis(TDMAnalysis):
         # year_indexes = np.where(dates_arr == year)
         paras_processed = []
         topics = []
+        proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
         for i in range(self.ntopics):
             word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
-            top_words = self.get_words_for_topic(word_dist_arr_ot, n=20, with_prob=False)
+            top_words = self.get_words_for_topic(word_dist_arr_ot, n=20, timestep_proportions=np.array(proportions[:,i]), with_prob=False)
             topics.append(top_words)
         iterator = self.dc.paras_processed if self.dc else self.paras_processed
         for para in iterator:
