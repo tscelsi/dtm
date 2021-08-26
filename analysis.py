@@ -176,8 +176,14 @@ class TDMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
-    def save_gammas(self, save_path="p_topic_document.csv"):
-        self.doc_topic_gammas.to_csv(save_path)
+    def save_gammas(self, save_path="p_topic_document.csv", split=True):
+        if split:
+            tmp_df = pd.DataFrame(self.doc_topic_gammas['topic_dist'].tolist(), columns=[i for i in range(self.ntopics)])
+            tmp_df['year'] = self.doc_topic_gammas['year']
+            tmp_df.to_csv(save_path)
+            del tmp_df
+        else:
+            self.doc_topic_gammas.to_csv(save_path)
 
     def _create_eurovoc_embedding_matrix(self):
         """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
@@ -724,19 +730,19 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 17064 # number of lines in -mult.dat file.
+    NDOCS = 15457 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = TDMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "dataset_labor_min_freq_80"),
+        model_root=os.path.join(os.environ['HANSARD'], "coal_output", "dtm", "general_run_18Aug", "2a_ngram", "raw"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
         model_out_dir="k30_a0.01_var0.1",
         eurovoc_whitelist=True,
         )
-    tdma._init_eurovoc(EUROVOC_PATH)
-    tdma.save_gammas()
+    # tdma._init_eurovoc(EUROVOC_PATH)
+    tdma.save_gammas(os.path.join(os.environ['HANSARD'], "coal_output", "dtm", "general_run_18Aug", "2a_ngram", "doc_topic_distribution.csv"))
     breakpoint()
     print("he")
