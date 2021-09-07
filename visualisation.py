@@ -12,13 +12,14 @@ def heatmap(X, save_path=None, **kwargs):
     # set sequential colour palette to avoid confusion
     plt.clf()
     palette = sns.color_palette("viridis", as_cmap=True)
-    sns.heatmap(data=X, center=0, cmap=palette, **kwargs)
+    g = sns.heatmap(data=X, center=0, cmap=palette, **kwargs)
     if save_path:
         print("saving heatmap...")
         plt.savefig(save_path)
-    else:
-        print("showing heatmap...")
-        plt.show()
+    # else:
+    #     print("showing heatmap...")
+    #     plt.show()
+    return plt, g
 
 
 def time_evolution_plot(df, filename, title=None, scale=1, save=True):
@@ -85,4 +86,13 @@ def time_evolution_plot(df, filename, title=None, scale=1, save=True):
         plt.title(title)
     if save:
         plt.savefig(filename, dpi=150, bbox_inches="tight")
+    return plt
+
+def plot_word_ot(df, title, save_path=None):
+    plt.clf()
+    fig = plt.figure(figsize=(10,10))
+    palette = sns.color_palette("viridis", as_cmap=True)
+    sns.lineplot(data=df).set(title=title)
+    if save_path:
+        plt.savefig(save_path)
     return plt

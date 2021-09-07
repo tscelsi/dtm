@@ -20,59 +20,17 @@ import gensim
 import gensim.downloader
 from collections import Counter, defaultdict
 import matplotlib.pylab as plt
-from visualisation import time_evolution_plot
+from visualisation import time_evolution_plot, plot_word_ot
 from pprint import pprint
 import seaborn as sns
 from spacy.matcher import PhraseMatcher
 from spacy.tokens import Doc
 import spacy
 
+WHITELIST_EUROVOC_LABELS_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_labels_merged.txt")
 EUROVOC_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_export_en.csv")
 
-class TDMAnalysis:
-
-    whitelist_eurovoc_topics = [
-        '6621 electrical and nuclear industries',
-        '6616 oil industry',
-        '6611 coal and mining industries',
-        '6406 production',
-        '2451 prices',
-        '6831 building and public works',
-        '2026 consumption',
-        '6836 wood industry',
-        '4026 accounting',
-        '4816 land transport',
-        '2016 trade',
-        '6416 research and intellectual property',
-        '7621 world organisations',
-        '4811 organisation of transport',
-        '6626 soft energy',
-        '2036 distributive trades',
-        '2006 trade policy',
-        '6826 electronics and electrical engineering',
-        '2446 taxation',
-        '1631 economic analysis',
-        '6811 chemistry',
-        '3611 humanities',
-        '5216 deterioration of the environment',
-        '2816 demography and population',
-        '6821 mechanical engineering',
-        '3606 natural and applied sciences',
-        '7226 asia and oceania',
-        '1216 criminal law',
-        '6411 technology and technical regulations',
-        '1611 economic conditions',
-        '7216 america',
-        '1621 economic structure',
-        '5211 natural environment',
-        '0821 defence',
-        '6816 iron, steel and other metal industries',
-        '4016 legal form of organisations',
-        '6036 food technology',
-        '2421 free movement of capital',
-        '7206 europe',
-        '1016 european construction'
-    ]
+class DTMAnalysis:
 
     topic_cluster_mapping = {
         "0421 parliament": "Legislation",
@@ -95,7 +53,19 @@ class TDMAnalysis:
     }
 
     eurovoc_label_correction_map = {
-        "6626 soft energy": "6626 renewable energy"
+        "6626 soft energy": "6626 renewable energy",
+        "6616 oil industry": "6616 oil and gas industry"
+    }
+
+    eurovoc_label_remapping = {
+        "1621 economic structure": "1611 economic conditions",
+        "2006 trade policy": "2016 business operations and trade",
+        "2421 free movement of capital": "2016 business operations and trade",
+        "2016 trade": "2016 business operations and trade",
+        "4006 business organisation": "2016 business operations and trade",
+        "4016 legal form of organisations" : "2016 business operations and trade",
+        "2426 financing and investment": "2016 business operations and trade",
+        "2026 consumption": "2016 business operations and trade",
     }
 
 
@@ -114,6 +84,8 @@ class TDMAnalysis:
         self.nlp = spacy.load("en_core_web_sm")
         self.ndocs = ndocs
         self.ntopics = ntopics
+        if eurovoc_whitelist:
+            self.whitelist_eurovoc_labels = [x.strip() for x in open(WHITELIST_EUROVOC_LABELS_PATH, "r").readlines()]
         self.eurovoc_whitelist = eurovoc_whitelist
         self.model_root = model_root
         self.model_out_dir = model_out_dir
@@ -239,13 +211,21 @@ class TDMAnalysis:
         
     def _init_eurovoc(self, eurovoc_path):
         print("Initialising EuroVoc...")
+        def preproc(label):
+            lowered_label = label.lower()
+            if lowered_label in self.eurovoc_label_remapping:
+                lowered_label = self.eurovoc_label_remapping[lowered_label]
+            if lowered_label in self.eurovoc_label_correction_map:
+                lowered_label = self.eurovoc_label_correction_map[lowered_label]
+            return lowered_label
         self.eurovoc = pd.read_csv(eurovoc_path)
+        self.eurovoc['MT'] = self.eurovoc['MT'].apply(preproc)
+        # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_remapping[x] if x in self.eurovoc_label_remapping else x)
+        # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_correction_map[x] if x in self.eurovoc_label_correction_map else x)
         # remove non-whitelisted topic terms
         if self.eurovoc_whitelist:
-            m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_topics, axis=1)
+            m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_labels, axis=1)
             self.eurovoc = self.eurovoc[m]
-        corrected_labels = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_correction_map[x] if x in self.eurovoc_label_correction_map else x)
-        self.eurovoc['MT'] = corrected_labels
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
         self.eurovoc = self.eurovoc.set_index('index')
         self._create_eurovoc_label_term_map()
@@ -268,7 +248,7 @@ class TDMAnalysis:
         topic_proportions_per_year = x.apply(lambda x: get_topic_proportions(x, logged))
         return topic_proportions_per_year
 
-    def create_topic_proportions_per_year_df(self, remove_small_topics, threshold, merge_topics=False, include_names=False):
+    def create_topic_proportions_per_year_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False):
         """
         This function creates a dataframe which eventually will be used for
         plotting topic proportions over time. Similar to the visualisations used
@@ -384,6 +364,7 @@ class TDMAnalysis:
     
     def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
         c = Counter()
+        terms = Counter()
         top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
         for i, topic in enumerate(self.eurovoc_topics):
             score = 0
@@ -391,6 +372,7 @@ class TDMAnalysis:
             matches = self.eurovoc_term_matcher(self.eurovoc_topic_docs[topic])
             for match_id,_,_ in matches:
                 term = self.nlp.vocab.strings[match_id]
+                terms[term] += 1
                 weight = top_word_dict[term]
                 term_ind = self.raw_term_list.index(term)
                 tfidf = self.tfidf_mat[term_ind][i]
@@ -416,11 +398,11 @@ class TDMAnalysis:
             if type(vec) != list:
                 word_vecs.append(vec)
         word_vecs = np.array(word_vecs)
-        word_vec = word_vecs.sum(axis=0).reshape(1,-1)
+        word_vec = word_vecs.mean(axis=0).reshape(1,-1)
         for i, topic in enumerate(self.embedding_matrix):
             # pairwise cosine sim between top words and topic term vectors
             topic_mat = np.array(topic)
-            topic_vec = topic_mat.sum(axis=0).reshape(1,-1)
+            topic_vec = topic_mat.mean(axis=0).reshape(1,-1)
             score = cosine_similarity(word_vec, topic_vec)[0][0]
             topic_name = self.eurovoc_topics[i]
             c.update({topic_name: score})
@@ -680,6 +662,25 @@ class TDMAnalysis:
         sorted_selection = self._get_sorted_columns(df_scores, sort_by)
         plt = time_evolution_plot(df_scores[sorted_selection], save_path, scale=0.75, save=save)
         return plt
+    
+    def plot_words_from_topic(self, topic_idx, words, title, save_path=None):
+        try:
+            word_indexes = []
+            for word in words:
+                ind = self.vocab.index(word)
+                assert self.vocab[ind] == word
+                word_indexes.append(ind)
+        except:
+            print("word not in vocab")
+            sys.exit(1)
+        topic_word_distribution = self.get_topic_word_distributions_ot(topic_idx)
+        word_ot = topic_word_distribution[:, word_indexes]
+        plot_df = pd.DataFrame(word_ot, columns=words)
+        plot_df['year'] = self.years
+        plot_df = plot_df.set_index('year')
+        plt = plot_word_ot(plot_df, title, save_path=save_path)
+        return plt
+        
 
 def compare_coherences(dataset_root, analysis_folder):
     pmi_c = Counter()
@@ -729,7 +730,7 @@ def compare_dataset_coherences():
 if __name__ == "__main__":
     NDOCS = 2446 # number of lines in -mult.dat file.
     NTOPICS = 30
-    tdma = TDMAnalysis(
+    tdma = DTMAnalysis(
         NDOCS, 
         NTOPICS,
         model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "greyroads_aeo_all_ngram"),
@@ -739,7 +740,10 @@ if __name__ == "__main__":
         model_out_dir="k30_a0.01_var0.1",
         eurovoc_whitelist=True,
         )
-    tdma._init_eurovoc(EUROVOC_PATH)
+    tdma.get_topic_names()
+    # tdma._init_eurovoc(EUROVOC_PATH)
+    # tdma._init_embeddings(load=False, save=True)
+    # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
     # tdma.save_gammas()
     breakpoint()
     print("he")
