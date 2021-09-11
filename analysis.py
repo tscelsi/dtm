@@ -183,9 +183,8 @@ class DTMAnalysis:
         for tok in tokens:
             if tok.lemma_ in self.embeddings:
                 vec.append(self.embeddings[tok.lemma_])
-        # take average of vectors to achieve embedding for term -- NO
         if vec:
-            vec = np.array(vec).sum(axis=0)
+            vec = np.array(vec).mean(axis=0)
         return vec
 
     def _init_embeddings(self, load, save=True, label_term_map_path="whitelist_label_to_term_map.pickle", embedding_matrix_path="whitelist_embedding_matrix.pickle", emb_type='glove-wiki-gigaword-50'):
@@ -391,19 +390,21 @@ class DTMAnalysis:
             self._init_eurovoc(EUROVOC_PATH)
         if not self.embeddings:
             self._init_embeddings(True, save=False)
-        words = [self.nlp(w) for _,w in top_words]
+        words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
+        word_probs = np.array([x for (x,_) in top_words])
         word_vecs = []
         for w in words:
             vec = self._get_vector_from_tokens(w)
             if type(vec) != list:
                 word_vecs.append(vec)
-        word_vecs = np.array(word_vecs)
+        word_vecs = np.array(word_vecs)*word_probs[:,np.newaxis]
         word_vec = word_vecs.mean(axis=0).reshape(1,-1)
         for i, topic in enumerate(self.embedding_matrix):
             # pairwise cosine sim between top words and topic term vectors
             topic_mat = np.array(topic)
             topic_vec = topic_mat.mean(axis=0).reshape(1,-1)
             score = cosine_similarity(word_vec, topic_vec)[0][0]
+            # score = np.multiply(scores.squeeze(), word_probs).sum()
             topic_name = self.eurovoc_topics[i]
             c.update({topic_name: score})
         return c
@@ -547,7 +548,7 @@ class DTMAnalysis:
             self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, timestep_proportions=_proportions, weighted=True, **kwargs))
         return self.top_word_arr
 
-    def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True, weighted=True, timestep_proportions=None):
+    def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True, weighted=True, timestep_proportions=None, rescaled=True):
         """
         This function takes in an NUM_YEARSxLEN_VOCAB array/matrix that
         represents the vocabulary distribution for each year a topic is
@@ -587,7 +588,11 @@ class DTMAnalysis:
             word_dist_arr_sorted = np.flip(word_dist_arr_sorted)
         top_pw = [acc[i] for i in word_dist_arr_sorted[:n]]
         top_words = [self.index_to_word[i] for i in word_dist_arr_sorted[:n]]
-        if with_prob:
+        if with_prob and rescaled:
+            total = sum(top_pw)
+            rescaled_probs = [x/total for x in top_pw]
+            return [(i, j) for i,j in zip(rescaled_probs, top_words)]
+        elif with_prob:
             return [(i, j) for i,j in zip(top_pw, top_words)]
         else:
             return [i for i in top_words]
@@ -740,7 +745,8 @@ if __name__ == "__main__":
         model_out_dir="k30_a0.01_var0.1",
         eurovoc_whitelist=True,
         )
-    tdma.get_topic_names()
+    topic_names = tdma.get_topic_names(_type="embedding", stringify=False)
+    # names = tdma.get_topic_names(_type="embedding", raw=True, stringify=False)
     # tdma._init_eurovoc(EUROVOC_PATH)
     # tdma._init_embeddings(load=False, save=True)
     # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
