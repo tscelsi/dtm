@@ -42,9 +42,9 @@ class DTMCreator:
         if isinstance(docs, str):
             # this is assumed to be path to df
             if docs.endswith(".tsv"):
-                self.df = pd.read_csv(docs, sep="\t")
+                self.df = pd.read_csv(docs, sep="\t", index_col=0)
             else:
-                self.df = pd.read_csv(docs)
+                self.df = pd.read_csv(docs, index_col=0)
             self.df = self.df.dropna(subset=[text_col_name])
             self.dates = self._extract_dates(date_col_name)
             self.paragraphs = self.df[text_col_name].tolist()
@@ -71,9 +71,13 @@ class DTMCreator:
         if limit:
             self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=self.spacy_batch_size)
             self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
+            self.doc_ids = [i for i in rand_indexes[:limit]]
+            self.df = self.df.iloc[rand_indexes[:limit]]
         else:
             self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=self.spacy_batch_size)
             self.rdates = [self.dates[i] for i in rand_indexes]
+            self.doc_ids = [i for i in rand_indexes]
+        # self.preproc_df = pd.DataFrame([self.doc_ids, self.rdocs, self.rdates], columns=["doc_id", "para", "year"])
         return
 
     @classmethod
@@ -163,11 +167,13 @@ class DTMCreator:
             basic (bool, optional): Whether to just undertake the basic preprocessing step to create the paras_processed list only. Defaults to False.
         """
         self.paras_processed = []
+        self.doc_id_order = []
         wids = {}
         wids_rev = {}
         self.wcounts = defaultdict(lambda:0)
         p = Preprocessing(self.rdocs, term_blacklist=self.term_blacklist)
         self.paras_processed = p.preprocess(ngrams=ngrams)
+        # self.preproc_df['preproc_para'] = self.paras_processed
         if save_preproc:
             df = self.df.copy()
             df['preproc_text'] = self.paras_processed
@@ -217,10 +223,11 @@ class DTMCreator:
                     self.years_final.append(self.year_mapping[self.rdates[idx]])
                 else:
                     self.years_final.append(self.rdates[idx])
-        if enable_downsampling:
-            self._downsample(ds_lower_limit)
-        if enable_upsampling:
-            self._upsample(us_upper_limit)
+                self.doc_id_order.append(self.doc_ids[idx])
+        # if enable_downsampling:
+        #     self._downsample(ds_lower_limit)
+        # if enable_upsampling:
+        #     self._upsample(us_upper_limit)
 
     def _upsample(self, limit=200):
         """
@@ -287,8 +294,9 @@ class DTMCreator:
         outmult = open(os.path.join(self.model_root, "model-mult.dat"), 'w+')
         outyear = open(os.path.join(self.model_root, "model-year.dat"), 'w+')
         outseq = open(os.path.join(self.model_root, "model-seq.dat"), 'w+')
+        # outdocids = open(os.path.join(self.model_root, "model-docids.dat"), "w+")
         year_dict = {}
-
+        ordered_doc_ids = []
         print(len(self.years_final))
         print(len(self.paras_to_wordcounts))
 
@@ -307,15 +315,19 @@ class DTMCreator:
                     yearcount[year]+=1
                     outyear.write(f"{str(yy)}\n")
                     outmult.write(f"{self.paras_to_wordcounts[idx]}\n")
+                    ordered_doc_ids.append(self.doc_id_order[idx])
+                    # outdocids.write(f"{str(self.doc_id_order[idx])}\n")
 
         outseq.write(f"{len(yearcount)}\n")
         for year in sorted(yearcount.keys()):
             outseq.write(f"{yearcount[year]}\n")
             year_dict[len(year_dict)]=year
-            
+        out_df = self.df.reindex(index=ordered_doc_ids)
+        out_df.to_csv(os.path.join(self.model_root, "doc_by_year.csv"))
         outyear.close()
         outmult.close()
         outseq.close()
+        # outdocids.close()
         
 
 

@@ -74,9 +74,9 @@ class DTMAnalysis:
         ndocs, 
         ntopics, 
         model_root="/data/greyroads/energy-roadmap/DTM/greyroads_steo", 
-        doc_year_map_file_name="eiatfidf-year.dat", 
-        seq_dat_file_name="eiatfidf-seq.dat", 
-        vocab_file_name="vocab_tfidf.txt",
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
+        vocab_file_name="vocab.txt",
         model_out_dir="model_run",
         eurovoc_whitelist=True,
         **kwargs
@@ -103,7 +103,6 @@ class DTMAnalysis:
         self.vocab = [x.split("\t")[0] for x in vocab]
         self.index_to_word = {i:w for i, w in enumerate(self.vocab)}
 
-        
         # load the doc-year mapping, which is just a list of length(number of documents) in the same order as
         # the -mult.dat file.
         self.doc_year_mapping = [int(x) for x in open(self.doc_year_map_path, "r").read().splitlines()]
@@ -152,8 +151,14 @@ class DTMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
-    def save_gammas(self, save_path="p_topic_document.csv"):
-        self.doc_topic_gammas.to_csv(save_path)
+    def save_gammas(self, save_path, split=True):
+        if split:
+            tmp_df = pd.DataFrame(self.doc_topic_gammas['topic_dist'].tolist(), columns=[i for i in range(self.ntopics)])
+            tmp_df['year'] = self.doc_topic_gammas['year']
+            tmp_df.to_csv(save_path)
+            del tmp_df
+        else:
+            self.doc_topic_gammas.to_csv(save_path)
 
     def _create_eurovoc_embedding_matrix(self):
         """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
@@ -733,12 +738,12 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 2446 # number of lines in -mult.dat file.
+    NDOCS = 15457 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = DTMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "greyroads_aeo_all_ngram"),
+        model_root=os.path.join(os.environ['HANSARD'], "coal_output", "dtm", "general_run_18Aug", "2a_ngram", "raw"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
