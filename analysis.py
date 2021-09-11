@@ -104,9 +104,9 @@ class TDMAnalysis:
         ndocs, 
         ntopics, 
         model_root="/data/greyroads/energy-roadmap/DTM/greyroads_steo", 
-        doc_year_map_file_name="eiatfidf-year.dat", 
-        seq_dat_file_name="eiatfidf-seq.dat", 
-        vocab_file_name="vocab_tfidf.txt",
+        doc_year_map_file_name="model-year.dat",
+        seq_dat_file_name="model-seq.dat",
+        vocab_file_name="vocab.txt",
         model_out_dir="model_run",
         eurovoc_whitelist=True,
         **kwargs
@@ -131,7 +131,6 @@ class TDMAnalysis:
         self.vocab = [x.split("\t")[0] for x in vocab]
         self.index_to_word = {i:w for i, w in enumerate(self.vocab)}
 
-        
         # load the doc-year mapping, which is just a list of length(number of documents) in the same order as
         # the -mult.dat file.
         self.doc_year_mapping = [int(x) for x in open(self.doc_year_map_path, "r").read().splitlines()]
@@ -180,7 +179,7 @@ class TDMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
-    def save_gammas(self, save_path="p_topic_document.csv", split=True):
+    def save_gammas(self, save_path, split=True):
         if split:
             tmp_df = pd.DataFrame(self.doc_topic_gammas['topic_dist'].tolist(), columns=[i for i in range(self.ntopics)])
             tmp_df['year'] = self.doc_topic_gammas['year']
@@ -745,7 +744,8 @@ if __name__ == "__main__":
         model_out_dir="k30_a0.01_var0.1",
         eurovoc_whitelist=True,
         )
-    tdma._init_eurovoc(EUROVOC_PATH)
+    # tdma._init_eurovoc(EUROVOC_PATH)
+    # tdma._init_embeddings(load=False)
     # tdma.save_gammas(os.path.join(os.environ['HANSARD'], "coal_output", "dtm", "general_run_18Aug", "2a_ngram", "doc_topic_distribution.csv"))
     breakpoint()
     print("he")
