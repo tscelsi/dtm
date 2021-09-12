@@ -77,6 +77,7 @@ class DTMCreator:
             self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=self.spacy_batch_size)
             self.rdates = [self.dates[i] for i in rand_indexes]
             self.doc_ids = [i for i in rand_indexes]
+            self.df = self.df.iloc[rand_indexes]
         # self.preproc_df = pd.DataFrame([self.doc_ids, self.rdocs, self.rdates], columns=["doc_id", "para", "year"])
         return
 
@@ -433,5 +434,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "journal_energy_policy_applied_energy_all_years_abstract_all_ngram"))
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_min_freq_150_12_09_21_wtf"))
     # fit_one()

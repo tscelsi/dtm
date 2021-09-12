@@ -57,6 +57,7 @@ class DTMAnalysis:
         "6616 oil industry": "6616 oil and gas industry"
     }
 
+    # default remapping, can be overridden in __init__
     eurovoc_label_remapping = {
         "1621 economic structure": "1611 economic conditions",
         "2006 trade policy": "2016 business operations and trade",
@@ -79,14 +80,19 @@ class DTMAnalysis:
         vocab_file_name="vocab.txt",
         model_out_dir="model_run",
         eurovoc_whitelist=True,
-        **kwargs
+        eurovoc_path=None,
+        eurovoc_label_remapping=None,
+        whitelist_path=None,
         ):
         self.nlp = spacy.load("en_core_web_sm")
         self.ndocs = ndocs
         self.ntopics = ntopics
-        if eurovoc_whitelist:
-            self.whitelist_eurovoc_labels = [x.strip() for x in open(WHITELIST_EUROVOC_LABELS_PATH, "r").readlines()]
+        self.eurovoc_path = eurovoc_path if eurovoc_path else EUROVOC_PATH
+        self.whitelist_path = whitelist_path if whitelist_path else WHITELIST_EUROVOC_LABELS_PATH
+        self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping else self.eurovoc_label_remapping
         self.eurovoc_whitelist = eurovoc_whitelist
+        if self.eurovoc_whitelist:
+            self.whitelist_eurovoc_labels = [x.strip() for x in open(self.whitelist_path, "r").readlines()]
         self.model_root = model_root
         self.model_out_dir = model_out_dir
         self.gam_path = os.path.join(self.model_root, self.model_out_dir, "lda-seq", "gam.dat")
@@ -97,6 +103,7 @@ class DTMAnalysis:
         self.embeddings = None
         self.topic_prefix = "topic-"
         self.topic_suffix = "-var-e-log-prob.dat"
+        
         vocab_file = os.path.join(self.model_root, vocab_file_name)
 
         vocab = open(vocab_file, "r").read().splitlines()
@@ -213,7 +220,7 @@ class DTMAnalysis:
             with open(label_term_map_path, "rb") as fp:
                 self.label_term_map = pickle.load(fp)
         
-    def _init_eurovoc(self, eurovoc_path):
+    def _init_eurovoc(self):
         print("Initialising EuroVoc...")
         def preproc(label):
             lowered_label = label.lower()
@@ -222,7 +229,7 @@ class DTMAnalysis:
             if lowered_label in self.eurovoc_label_correction_map:
                 lowered_label = self.eurovoc_label_correction_map[lowered_label]
             return lowered_label
-        self.eurovoc = pd.read_csv(eurovoc_path)
+        self.eurovoc = pd.read_csv(self.eurovoc_path)
         self.eurovoc['MT'] = self.eurovoc['MT'].apply(preproc)
         # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_remapping[x] if x in self.eurovoc_label_remapping else x)
         # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_correction_map[x] if x in self.eurovoc_label_correction_map else x)
@@ -392,7 +399,7 @@ class DTMAnalysis:
     def _get_embedding_scores(self, top_words):
         c = Counter()
         if isinstance(self.eurovoc, type(None)):
-            self._init_eurovoc(EUROVOC_PATH)
+            self._init_eurovoc()
         if not self.embeddings:
             self._init_embeddings(True, save=False)
         words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
@@ -520,7 +527,7 @@ class DTMAnalysis:
         
         """
         if isinstance(self.eurovoc, type(None)):
-            self._init_eurovoc(EUROVOC_PATH)
+            self._init_eurovoc()
         topic_names = []
         self.top_word_arr = []
         proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
@@ -738,21 +745,23 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 15457 # number of lines in -mult.dat file.
+    NDOCS = 7317 # number of lines in -mult.dat file.
     NTOPICS = 30
     tdma = DTMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['HANSARD'], "coal_output", "dtm", "general_run_18Aug", "2a_ngram", "raw"),
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_last_20_years_min_freq_80_12_09_21"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
-        model_out_dir="k30_a0.01_var0.1",
+        model_out_dir="k30_a0.01_var0.05",
         eurovoc_whitelist=True,
+        eurovoc_label_remapping=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "remapping.json"),
+        whitelist_path=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "eurovoc_labels_merged.txt")
         )
-    topic_names = tdma.get_topic_names(_type="embedding", stringify=False)
+    # topic_names = tdma.get_topic_names(_type="embedding", stringify=False)
     # names = tdma.get_topic_names(_type="embedding", raw=True, stringify=False)
-    # tdma._init_eurovoc(EUROVOC_PATH)
+    # tdma._init_eurovoc()
     # tdma._init_embeddings(load=False, save=True)
     # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
     # tdma.save_gammas()
