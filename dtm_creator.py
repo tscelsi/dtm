@@ -42,9 +42,9 @@ class DTMCreator:
         if isinstance(docs, str):
             # this is assumed to be path to df
             if docs.endswith(".tsv"):
-                self.df = pd.read_csv(docs, sep="\t", index_col=0)
+                self.df = pd.read_csv(docs, sep="\t")
             else:
-                self.df = pd.read_csv(docs, index_col=0)
+                self.df = pd.read_csv(docs)
             self.df = self.df.dropna(subset=[text_col_name])
             self.dates = self._extract_dates(date_col_name)
             self.paragraphs = self.df[text_col_name].tolist()
@@ -322,7 +322,7 @@ class DTMCreator:
         for year in sorted(yearcount.keys()):
             outseq.write(f"{yearcount[year]}\n")
             year_dict[len(year_dict)]=year
-        out_df = self.df.reindex(index=ordered_doc_ids)
+        out_df = self.df.iloc[ordered_doc_ids].reindex(index=ordered_doc_ids)
         out_df['index'] = out_df.index
         out_df['index'].to_csv(os.path.join(self.model_root, "doc_by_year_map.csv"))
         outyear.close()
