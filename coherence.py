@@ -1,4 +1,4 @@
-from analysis import TDMAnalysis
+from analysis import DTMAnalysis
 from hansard_dtm_creator import HansardDTMCreator
 from greyroads_dtm_creator import GreyroadsDTMCreator
 from journals_dtm_creator import JournalDTMCreator
@@ -10,7 +10,7 @@ import sys
 import numpy as np
 import traceback
 
-class CoherenceAnalysis(TDMAnalysis):
+class CoherenceAnalysis(DTMAnalysis):
     def __init__(self, data_path, _type, text_col_name, date_col_name, bigram, limit, *args, **kwargs):
         super().__init__(*args, **kwargs)
         model_root = kwargs.get('model_root')
