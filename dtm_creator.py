@@ -323,7 +323,8 @@ class DTMCreator:
             outseq.write(f"{yearcount[year]}\n")
             year_dict[len(year_dict)]=year
         out_df = self.df.reindex(index=ordered_doc_ids)
-        out_df.to_csv(os.path.join(self.model_root, "doc_by_year.csv"))
+        out_df['index'] = out_df.index
+        out_df['index'].to_csv(os.path.join(self.model_root, "doc_by_year_map.csv"))
         outyear.close()
         outmult.close()
         outseq.close()
