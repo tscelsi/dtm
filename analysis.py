@@ -405,12 +405,12 @@ class DTMAnalysis:
         words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
         word_probs = np.array([x for (x,_) in top_words])
         word_vecs = []
-        for w in words:
+        for i,w in enumerate(words):
             vec = self._get_vector_from_tokens(w)
             if type(vec) != list:
-                word_vecs.append(vec)
-        word_vecs = np.array(word_vecs)*word_probs[:,np.newaxis]
-        word_vec = word_vecs.mean(axis=0).reshape(1,-1)
+                word_vecs.append(vec*word_probs[i])
+        # word_vecs = np.array(word_vecs)*word_probs[:,np.newaxis]
+        word_vec = np.array(word_vecs).mean(axis=0).reshape(1,-1)
         for i, topic in enumerate(self.embedding_matrix):
             # pairwise cosine sim between top words and topic term vectors
             topic_mat = np.array(topic)
