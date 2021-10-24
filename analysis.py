@@ -14,6 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import numpy as np
 import re
 import csv
+import json
 import pickle
 from sklearn.metrics.pairwise import cosine_similarity
 import gensim
@@ -70,6 +71,15 @@ class DTMAnalysis:
         self.eurovoc_path = eurovoc_path if eurovoc_path else EUROVOC_PATH
         self.whitelist_path = whitelist_path if whitelist_path else WHITELIST_EUROVOC_LABELS_PATH
         self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping != None else self.eurovoc_label_remapping
+        # if we're passed a string, let's try load it as a json obj. if this doesn't work, throw error
+        if isinstance(self.eurovoc_label_remapping, str):
+            try:
+                with open(self.eurovoc_label_remapping, "r") as fp:
+                    self.eurovoc_label_remapping = json.load(fp)
+            except FileNotFoundError:
+                print("The remapping string that was passed didn't lead to a json file with a EuroVoc remapping.\
+                     Try changing the path, or remove the eurovoc_label_remapping argument.")
+                sys.exit(1)
         self.eurovoc_whitelist = eurovoc_whitelist
         if self.eurovoc_whitelist:
             self.whitelist_eurovoc_labels = [x.strip().lower() for x in open(self.whitelist_path, "r").readlines()]
@@ -139,66 +149,70 @@ class DTMAnalysis:
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
     def save_gammas(self, save_path, split=True):
+        doc_ids = pd.read_csv(os.path.join(self.model_root, "doc_ids.csv"))
+        assert len(doc_ids) == len(self.doc_topic_gammas)
         if split:
             tmp_df = pd.DataFrame(self.doc_topic_gammas['topic_dist'].tolist(), columns=[i for i in range(self.ntopics)])
             tmp_df['year'] = self.doc_topic_gammas['year']
+            tmp_df['doc_id'] = doc_ids['doc_id']
             tmp_df.to_csv(save_path)
             del tmp_df
         else:
+            self.doc_topic_gammas['doc_id'] = doc_ids['doc_id']
             self.doc_topic_gammas.to_csv(save_path)
 
-    def _create_eurovoc_embedding_matrix(self):
-        """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
-        T_k is the number of terms for a eurovoc label k and gloVedims is the dimensions of the pre-trained gloVe word embeddings as per gensim docs.
+    # def _create_eurovoc_embedding_matrix(self):
+    #     """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
+    #     T_k is the number of terms for a eurovoc label k and gloVedims is the dimensions of the pre-trained gloVe word embeddings as per gensim docs.
 
-        To create this matrix this function iterates through the terms of a eurovoc label 
-        """
-        self.label_term_map = {}
-        self.embedding_matrix = []
-        for topic in self.eurovoc_topics:
-            mask = self.eurovoc['MT'].apply(lambda x: x.lower()) == topic
-            terms = self.nlp.pipe([x.lower() for x in self.eurovoc[mask]['TERMS (PT-NPT)']], n_process=11)
-            term_vec_matrix = []
-            term_list = []
-            for term in terms:
-                vec = self._get_vector_from_tokens(term)
-                # take average of vectors to achieve embedding for term
-                if type(vec) == np.ndarray:
-                    term_vec_matrix.append(vec)
-                    term_list.append(term.text)
-            self.label_term_map[topic] = term_list
-            self.embedding_matrix.append(term_vec_matrix)
-        self.embedding_matrix = np.array(self.embedding_matrix)
+    #     To create this matrix this function iterates through the terms of a eurovoc label 
+    #     """
+    #     self.label_term_map = {}
+    #     self.embedding_matrix = []
+    #     for topic in self.eurovoc_topics:
+    #         mask = self.eurovoc['MT'].apply(lambda x: x.lower()) == topic
+    #         terms = self.nlp.pipe([x.lower() for x in self.eurovoc[mask]['TERMS (PT-NPT)']], n_process=11)
+    #         term_vec_matrix = []
+    #         term_list = []
+    #         for term in terms:
+    #             vec = self._get_vector_from_tokens(term)
+    #             # take average of vectors to achieve embedding for term
+    #             if type(vec) == np.ndarray:
+    #                 term_vec_matrix.append(vec)
+    #                 term_list.append(term.text)
+    #         self.label_term_map[topic] = term_list
+    #         self.embedding_matrix.append(term_vec_matrix)
+    #     self.embedding_matrix = np.array(self.embedding_matrix)
 
-    def _get_vector_from_tokens(self, tokens):
-        vec = []
-        for tok in tokens:
-            if tok.lemma_ in self.embeddings:
-                vec.append(self.embeddings[tok.lemma_])
-        if vec:
-            vec = np.array(vec).mean(axis=0)
-        return vec
+    # def _get_vector_from_tokens(self, tokens):
+    #     vec = []
+    #     for tok in tokens:
+    #         if tok.lemma_ in self.embeddings:
+    #             vec.append(self.embeddings[tok.lemma_])
+    #     if vec:
+    #         vec = np.array(vec).mean(axis=0)
+    #     return vec
 
-    def _init_embeddings(self, load, save=True, label_term_map_path="whitelist_label_to_term_map.pickle", embedding_matrix_path="whitelist_embedding_matrix.pickle", emb_type='glove-wiki-gigaword-50'):
-        print("Initialising gloVe embeddings...")
-        self.embeddings = gensim.downloader.load(emb_type)
-        if not load:
-            self._create_eurovoc_embedding_matrix()
-            if save and (not label_term_map_path or not embedding_matrix_path):
-                print("If you want to save the embeddings, you need to provide label_term_map_path and embedding_matrix_path values.")
-            elif save and label_term_map_path and embedding_matrix_path:
-                with open(embedding_matrix_path, "wb+") as fp:
-                    pickle.dump(self.embedding_matrix, fp)
-                with open(label_term_map_path, "wb+") as fp:
-                    pickle.dump(self.label_term_map, fp)
-        elif load and (not label_term_map_path or not embedding_matrix_path):
-            print("If loading the eurovoc embeddings matrix, you need to provide a path for the label term list and embedding matrix path.")
-            sys.exit(1)
-        elif load:
-            with open(embedding_matrix_path, "rb") as fp:
-                self.embedding_matrix = np.array(pickle.load(fp))
-            with open(label_term_map_path, "rb") as fp:
-                self.label_term_map = pickle.load(fp)
+    # def _init_embeddings(self, load, save=True, label_term_map_path="whitelist_label_to_term_map.pickle", embedding_matrix_path="whitelist_embedding_matrix.pickle", emb_type='glove-wiki-gigaword-50'):
+    #     print("Initialising gloVe embeddings...")
+    #     self.embeddings = gensim.downloader.load(emb_type)
+    #     if not load:
+    #         self._create_eurovoc_embedding_matrix()
+    #         if save and (not label_term_map_path or not embedding_matrix_path):
+    #             print("If you want to save the embeddings, you need to provide label_term_map_path and embedding_matrix_path values.")
+    #         elif save and label_term_map_path and embedding_matrix_path:
+    #             with open(embedding_matrix_path, "wb+") as fp:
+    #                 pickle.dump(self.embedding_matrix, fp)
+    #             with open(label_term_map_path, "wb+") as fp:
+    #                 pickle.dump(self.label_term_map, fp)
+    #     elif load and (not label_term_map_path or not embedding_matrix_path):
+    #         print("If loading the eurovoc embeddings matrix, you need to provide a path for the label term list and embedding matrix path.")
+    #         sys.exit(1)
+    #     elif load:
+    #         with open(embedding_matrix_path, "rb") as fp:
+    #             self.embedding_matrix = np.array(pickle.load(fp))
+    #         with open(label_term_map_path, "rb") as fp:
+    #             self.label_term_map = pickle.load(fp)
         
     def _init_eurovoc(self):
         print("Initialising EuroVoc...")
@@ -218,6 +232,7 @@ class DTMAnalysis:
             m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_labels, axis=1)
             self.eurovoc = self.eurovoc[m]
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
+        assert len(self.eurovoc['MT'].drop_duplicates()) == len(self.whitelist_eurovoc_labels)
         self.eurovoc = self.eurovoc.set_index('index')
         self._create_eurovoc_label_term_map()
         # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
@@ -290,143 +305,143 @@ class DTMAnalysis:
         df = df / df.sum() * 100
         return df
 
-    def _create_eurovoc_label_term_map(self):
-        eurovoc_label_term_map = {}
-        self.eurovoc_topic_docs = {}
-        for term, topic in zip(self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner'], batch_size=256, n_process=11), self.eurovoc['MT'].apply(lambda x: x.lower())):
-            if topic in eurovoc_label_term_map:
-                eurovoc_label_term_map[topic].append(term)
-            else:
-                eurovoc_label_term_map[topic] = [term]
-        for topic in eurovoc_label_term_map:
-            curr_topic_list = eurovoc_label_term_map[topic]
-            c_doc = Doc.from_docs(curr_topic_list, ensure_whitespace=True)
-            self.eurovoc_topic_docs[topic] = c_doc
-        self.eurovoc_topics = sorted(np.array(list(self.eurovoc_topic_docs.keys())))
-        # self.eurovoc_topic_indices = sorted(self.eurovoc_topics)
+    # def _create_eurovoc_label_term_map(self):
+    #     eurovoc_label_term_map = {}
+    #     self.eurovoc_topic_docs = {}
+    #     for term, topic in zip(self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner'], batch_size=256, n_process=11), self.eurovoc['MT'].apply(lambda x: x.lower())):
+    #         if topic in eurovoc_label_term_map:
+    #             eurovoc_label_term_map[topic].append(term)
+    #         else:
+    #             eurovoc_label_term_map[topic] = [term]
+    #     for topic in eurovoc_label_term_map:
+    #         curr_topic_list = eurovoc_label_term_map[topic]
+    #         c_doc = Doc.from_docs(curr_topic_list, ensure_whitespace=True)
+    #         self.eurovoc_topic_docs[topic] = c_doc
+    #     self.eurovoc_topics = sorted(np.array(list(self.eurovoc_topic_docs.keys())))
+    #     # self.eurovoc_topic_indices = sorted(self.eurovoc_topics)
 
-    def get_topic_tfidf_scores(self, top_terms, tfidf_enabled=False):
-        """
-        Returns a matrix for a DTM topic where the rows represent a top term for the dtm topic, and the columns
-        represent each EuroVoc topic. Each cell is the tfidf value of a particular term-topic
-        combination. This will be used when calculating the automatic EuroVoc topic labels for the
-        DTM topics.
+    # def get_topic_tfidf_scores(self, top_terms, tfidf_enabled=False):
+    #     """
+    #     Returns a matrix for a DTM topic where the rows represent a top term for the dtm topic, and the columns
+    #     represent each EuroVoc topic. Each cell is the tfidf value of a particular term-topic
+    #     combination. This will be used when calculating the automatic EuroVoc topic labels for the
+    #     DTM topics.
 
-        i.e. shape is | top_terms | x | EuroVoc Topics |
-        """
-        self.tfidf_mat = np.zeros((len(top_terms), len(self.eurovoc_topics)))
-        # number of documents containing a term
-        N = Counter()
-        tfs = {}
-        doc_lens = {}
-        # ensure to get rid of the underscores in bigram terms and then rejoin with space
-        # i.e. 'greenhouse_gas' becomes 'greenhouse gas'
-        spacy_terms = [t for t in self.nlp.pipe([" ".join(t.split("_")) for _, t in top_terms], disable=['tok2vec', 'ner'], n_process=11)]
-        self.raw_term_list = [t.text for t in spacy_terms]
-        self.eurovoc_term_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA", validate=True)
-        for term in spacy_terms:
-            self.eurovoc_term_matcher.add(term.text, [term])
-        ## term freq
-        ## total terms in each topic (doc)
-        ## number of docs that match term
-        ## total number of docs
-        for topic in self.eurovoc_topics:
-            term_freq = Counter()
-            curr_doc = self.eurovoc_topic_docs[topic]
-            doc_len = len(self.eurovoc_topic_docs[topic])
-            doc_lens[topic] = doc_len
-            terms_contained_in_topic = set()
-            matches = self.eurovoc_term_matcher(curr_doc)
-            if matches:
-                for match_id, _, _ in matches:
-                    matched_term = self.nlp.vocab.strings[match_id]
-                    terms_contained_in_topic.add(matched_term)
-                    term_freq[matched_term] += 1
-                tfs[topic] = term_freq
-            N.update(terms_contained_in_topic)
-        # calculate tfidfs for each term in each topic
-        for i, topic in enumerate(self.eurovoc_topics):
-            try:
-                curr_tfs = tfs[topic]
-                doc_len = doc_lens[topic]
-                for term in curr_tfs:
-                    ind = self.raw_term_list.index(term)
-                    tf = curr_tfs[term] / doc_len
-                    idf = np.log(len(self.eurovoc_topic_docs.keys()) / N[term])
-                    tfidf = tf * idf
-                    if tfidf_enabled:
-                        self.tfidf_mat[ind][i] = tfidf
-                    else:
-                        # just idf
-                        self.tfidf_mat[ind][i] = idf
-            except KeyError as e:
-                continue
-        return self.tfidf_mat
+    #     i.e. shape is | top_terms | x | EuroVoc Topics |
+    #     """
+    #     self.tfidf_mat = np.zeros((len(top_terms), len(self.eurovoc_topics)))
+    #     # number of documents containing a term
+    #     N = Counter()
+    #     tfs = {}
+    #     doc_lens = {}
+    #     # ensure to get rid of the underscores in bigram terms and then rejoin with space
+    #     # i.e. 'greenhouse_gas' becomes 'greenhouse gas'
+    #     spacy_terms = [t for t in self.nlp.pipe([" ".join(t.split("_")) for _, t in top_terms], disable=['tok2vec', 'ner'], n_process=11)]
+    #     self.raw_term_list = [t.text for t in spacy_terms]
+    #     self.eurovoc_term_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA", validate=True)
+    #     for term in spacy_terms:
+    #         self.eurovoc_term_matcher.add(term.text, [term])
+    #     ## term freq
+    #     ## total terms in each topic (doc)
+    #     ## number of docs that match term
+    #     ## total number of docs
+    #     for topic in self.eurovoc_topics:
+    #         term_freq = Counter()
+    #         curr_doc = self.eurovoc_topic_docs[topic]
+    #         doc_len = len(self.eurovoc_topic_docs[topic])
+    #         doc_lens[topic] = doc_len
+    #         terms_contained_in_topic = set()
+    #         matches = self.eurovoc_term_matcher(curr_doc)
+    #         if matches:
+    #             for match_id, _, _ in matches:
+    #                 matched_term = self.nlp.vocab.strings[match_id]
+    #                 terms_contained_in_topic.add(matched_term)
+    #                 term_freq[matched_term] += 1
+    #             tfs[topic] = term_freq
+    #         N.update(terms_contained_in_topic)
+    #     # calculate tfidfs for each term in each topic
+    #     for i, topic in enumerate(self.eurovoc_topics):
+    #         try:
+    #             curr_tfs = tfs[topic]
+    #             doc_len = doc_lens[topic]
+    #             for term in curr_tfs:
+    #                 ind = self.raw_term_list.index(term)
+    #                 tf = curr_tfs[term] / doc_len
+    #                 idf = np.log(len(self.eurovoc_topic_docs.keys()) / N[term])
+    #                 tfidf = tf * idf
+    #                 if tfidf_enabled:
+    #                     self.tfidf_mat[ind][i] = tfidf
+    #                 else:
+    #                     # just idf
+    #                     self.tfidf_mat[ind][i] = idf
+    #         except KeyError as e:
+    #             continue
+    #     return self.tfidf_mat
     
-    def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
-        c = Counter()
-        terms = Counter()
-        top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
-        for i, topic in enumerate(self.eurovoc_topics):
-            score = 0
-            # topic_ind = np.where(self.eurovoc_topics == topic)[0][0]
-            matches = self.eurovoc_term_matcher(self.eurovoc_topic_docs[topic])
-            for match_id,_,_ in matches:
-                term = self.nlp.vocab.strings[match_id]
-                terms[term] += 1
-                weight = top_word_dict[term]
-                term_ind = self.raw_term_list.index(term)
-                tfidf = self.tfidf_mat[term_ind][i]
-                # weighting and tf-idf 
-                if tfidf_enabled:
-                    tmp = weight * tfidf
-                    score = score + (weight * tfidf)
-                else:
-                    score = score + weight
-            c.update({topic: score})
-        return c
+    # def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
+    #     c = Counter()
+    #     terms = Counter()
+    #     top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
+    #     for i, topic in enumerate(self.eurovoc_topics):
+    #         score = 0
+    #         # topic_ind = np.where(self.eurovoc_topics == topic)[0][0]
+    #         matches = self.eurovoc_term_matcher(self.eurovoc_topic_docs[topic])
+    #         for match_id,_,_ in matches:
+    #             term = self.nlp.vocab.strings[match_id]
+    #             terms[term] += 1
+    #             weight = top_word_dict[term]
+    #             term_ind = self.raw_term_list.index(term)
+    #             tfidf = self.tfidf_mat[term_ind][i]
+    #             # weighting and tf-idf 
+    #             if tfidf_enabled:
+    #                 tmp = weight * tfidf
+    #                 score = score + (weight * tfidf)
+    #             else:
+    #                 score = score + weight
+    #         c.update({topic: score})
+    #     return c
 
-    def _get_embedding_scores(self, top_words):
-        c = Counter()
-        if isinstance(self.eurovoc, type(None)):
-            self._init_eurovoc()
-        if not self.embeddings:
-            self._init_embeddings(False, save=False)
-        words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
-        word_probs = np.array([x for (x,_) in top_words])
-        word_vecs = []
-        unweighted_word_vecs = []
-        for i,w in enumerate(words):
-            vec = self._get_vector_from_tokens(w)
-            if type(vec) != list:
-                word_vecs.append(vec*word_probs[i])
-        word_vecs = np.array(word_vecs)
-        word_vec = word_vecs.mean(axis=0).reshape(1,-1)
-        for i, topic in enumerate(self.embedding_matrix):
-            # pairwise cosine sim between top words and topic term vectors
-            topic_mat = np.array(topic)
-            topic_vec = topic_mat.mean(axis=0).reshape(1,-1)
-            score = cosine_similarity(word_vec, topic_vec)[0][0]
-            # score = np.multiply(scores.squeeze(), word_probs).sum()
-            topic_name = self.eurovoc_topics[i]
-            c.update({topic_name: score})
-        return c
+    # def _get_embedding_scores(self, top_words):
+    #     c = Counter()
+    #     if isinstance(self.eurovoc, type(None)):
+    #         self._init_eurovoc()
+    #     if not self.embeddings:
+    #         self._init_embeddings(False, save=False)
+    #     words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
+    #     word_probs = np.array([x for (x,_) in top_words])
+    #     word_vecs = []
+    #     unweighted_word_vecs = []
+    #     for i,w in enumerate(words):
+    #         vec = self._get_vector_from_tokens(w)
+    #         if type(vec) != list:
+    #             word_vecs.append(vec*word_probs[i])
+    #     word_vecs = np.array(word_vecs)
+    #     word_vec = word_vecs.mean(axis=0).reshape(1,-1)
+    #     for i, topic in enumerate(self.embedding_matrix):
+    #         # pairwise cosine sim between top words and topic term vectors
+    #         topic_mat = np.array(topic)
+    #         topic_vec = topic_mat.mean(axis=0).reshape(1,-1)
+    #         score = cosine_similarity(word_vec, topic_vec)[0][0]
+    #         # score = np.multiply(scores.squeeze(), word_probs).sum()
+    #         topic_name = self.eurovoc_topics[i]
+    #         c.update({topic_name: score})
+    #     return c
 
-    def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False, score_type="tfidf"):
-        if score_type == "tfidf":
-            weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
-        elif score_type == "embedding":
-            weighted_ev_topics = self._get_embedding_scores(top_words)
-        else:
-            print("score_type needs to be one of either tfidf|embedding")
-            sys.exit(1)
-        # raw scores takes precedence over stringifying
-        if return_raw_scores:
-            return weighted_ev_topics
-        elif stringify:
-            return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
-        else:
-            return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
+    # def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False, score_type="tfidf"):
+    #     if score_type == "tfidf":
+    #         weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
+    #     elif score_type == "embedding":
+    #         weighted_ev_topics = self._get_embedding_scores(top_words)
+    #     else:
+    #         print("score_type needs to be one of either tfidf|embedding")
+    #         sys.exit(1)
+    #     # raw scores takes precedence over stringifying
+    #     if return_raw_scores:
+    #         return weighted_ev_topics
+    #     elif stringify:
+    #         return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
+    #     else:
+    #         return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
     def _get_baseline_topic_vectors(self, simple=True, zeroed=False, indices=None):
         """
@@ -808,17 +823,6 @@ def compare_dataset_coherences():
 if __name__ == "__main__":
     NDOCS = 2686 # number of lines in -mult.dat file.
     NTOPICS = 30
-    # tdma = DTMAnalysis(
-    #     NDOCS, 
-    #     NTOPICS,
-    #     model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "final_datasets", "greyroads_aeo_min_freq_40_1997_2020_ngram"),
-    #     doc_year_map_file_name="model-year.dat",
-    #     seq_dat_file_name="model-seq.dat",
-    #     vocab_file_name="vocab.txt",
-    #     model_out_dir="k30_a0.01_var0.05",
-    #     eurovoc_whitelist=True,
-    #     )
-    # topic_names = tdma.get_topic_names(_type="embedding", stringify=False, raw=True)
     whitelist_label_path = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_labels_merged.txt")
     analysis = DTMAnalysis(
         2686, 
@@ -831,20 +835,3 @@ if __name__ == "__main__":
         eurovoc_whitelist=True,
         whitelist_path=whitelist_label_path,
         )
-    # res = analysis.get_topic_names_for_topic_ot(0)
-    # res = analysis.plot_labels_ot_from_topic(0, ["5206 environmental policy", "5211 natural environment"], "hello")
-
-    # analysis._init_eurovoc()
-    # analysis.plot_topics_ot(os.path.join(os.environ['DTM_ROOT'], "dtm", "final_datasets", "greyroads_ieo_min_freq_40_1997_2020_ngram", "DANG.png"), scale=1.2, include_names=True, sort_by="col")
-    emb_labels = analysis.get_topic_names(_type="embedding", raw=True)
-    tfidf_labels = analysis.get_topic_names(_type="tfidf", raw=True)
-    # topics = [0,26]
-    # words = [['coal', 'natural_gas', 'renewable', 'nuclear', 'solar'], ['cpp', 'cair']]
-    # tdma.plot_words_topic_ot(topics, words)
-    # tdma.plot_topics_ot(os.path.join(os.environ['ROADMAP_SCRAPER'], "figures", "aeo", "topics_ot.png"), scale=1.1, sort_by="topicnum", keep=[0,1,3,6,8,11,12,16,19,22,24,26])
-    # tdma._init_eurovoc()
-    # tdma._init_embeddings(load=False, save=True)
-    # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
-    # tdma.save_gammas()
-    breakpoint()
-    print("he")

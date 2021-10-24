@@ -16,7 +16,7 @@ import json
 from multiprocessing import Pool
 from nltk.collocations import BigramAssocMeasures, TrigramAssocMeasures, BigramCollocationFinder, TrigramCollocationFinder
 from preprocessing import Preprocessing
-
+from pprint import pprint
 # preproc_ngram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "NGRAMS_PROC.txt")
 # bigram_path = os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "BIGRAMS.txt")
 SEED = 42
@@ -31,7 +31,8 @@ class DTMCreator:
         model_root, 
         docs,
         text_col_name='section_txt', 
-        date_col_name='date', 
+        date_col_name='date',
+        doc_id_col_name='doc_id',
         bigram=True, 
         limit=None, 
         years_per_step=1,
@@ -45,13 +46,18 @@ class DTMCreator:
                 self.df = pd.read_csv(docs, sep="\t")
             else:
                 self.df = pd.read_csv(docs)
+            # add dtm_id as column which copies the original index of df
+            self.doc_id_col_name = doc_id_col_name
+            self.text_col_name = text_col_name
             self.df = self.df.dropna(subset=[text_col_name])
-            self.dates = self._extract_dates(date_col_name)
+            self.years = self._extract_dates(date_col_name)
             self.paragraphs = self.df[text_col_name].tolist()
         elif isinstance(docs, list):
             # this is assumed to be doc,year tuples already processed
             self.paragraphs = [x for x,_ in docs]
-            self.dates = [int(x) for _,x in docs]
+            self.years = [int(x) for _,x in docs]
+            self.df = pd.DataFrame([self.paragraphs], columns=["section_txt"])
+        self.df['year'] = self.years
         self.bigram = bigram
         self.years_per_step = years_per_step
         # create directory structure
@@ -69,15 +75,15 @@ class DTMCreator:
         self.rdates = []
         rand_indexes = [idx for idx in random.RandomState(SEED).permutation(len(self.paragraphs))] if shuffle else range(len(self.paragraphs))
         if limit:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=self.spacy_batch_size)
-            self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
-            self.doc_ids = [i for i in rand_indexes[:limit]]
+            # self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes[:limit]], n_process=11, batch_size=self.spacy_batch_size)
+            # self.rdates = [self.dates[i] for i in rand_indexes[:limit]]
+            # self.doc_ids = [i for i in rand_indexes[:limit]]
             self.df = self.df.iloc[rand_indexes[:limit]]
         else:
-            self.rdocs = self.nlp.pipe([self.paragraphs[i].lower() for i in rand_indexes], n_process=11, batch_size=self.spacy_batch_size)
-            self.rdates = [self.dates[i] for i in rand_indexes]
-            self.doc_ids = [i for i in rand_indexes]
+            # self.rdates = [self.dates[i] for i in rand_indexes]
+            # self.doc_ids = [i for i in rand_indexes]
             self.df = self.df.iloc[rand_indexes]
+        self.rdocs = self.nlp.pipe(self.df[text_col_name], n_process=11, batch_size=self.spacy_batch_size)
         # self.preproc_df = pd.DataFrame([self.doc_ids, self.rdocs, self.rdates], columns=["doc_id", "para", "year"])
         return
 
@@ -106,7 +112,7 @@ class DTMCreator:
         raise NotImplementedError
 
     def _get_year_batches(self, years_list=None):
-        years = years_list if years_list else self.rdates
+        years = years_list if years_list else self.df['year']
         year_mapping = {}
         for year in years:
             batch_num = int((year - min(years)) / self.years_per_step)
@@ -168,23 +174,24 @@ class DTMCreator:
             basic (bool, optional): Whether to just undertake the basic preprocessing step to create the paras_processed list only. Defaults to False.
         """
         self.paras_processed = []
-        self.doc_id_order = []
+        self.doc_index_order = []
         wids = {}
         wids_rev = {}
         self.wcounts = defaultdict(lambda:0)
         p = Preprocessing(self.rdocs, term_blacklist=self.term_blacklist)
         self.paras_processed = p.preprocess(ngrams=ngrams)
+        self.df['preproc_para'] = self.paras_processed
         # self.preproc_df['preproc_para'] = self.paras_processed
         if save_preproc:
+            # saves the preprocessed corpus before any filtering on paragraphs is done.
             df = self.df.copy()
-            df['preproc_text'] = self.paras_processed
             df.to_csv(os.path.join(self.model_root, "preproc_df.csv"))
             del df
         if basic:
             return self.paras_processed
         
         # count words
-        for d in self.paras_processed:
+        for d in self.df['preproc_para']:
             for s in d:
                 for w in s:
                     self.wcounts[w]+=1           
@@ -192,14 +199,12 @@ class DTMCreator:
         self.wcounts = {k:v for k,v in self.wcounts.items() if v>min_freq} 
 
         # collect word IDs
-        for d in self.paras_processed:
+        for d in self.df['preproc_para']:
             for s in d:
                 for w in s:
                     if w in self.wcounts and w not in wids:
                         wids_rev[len(wids)]=w
                         wids[w]=len(wids)
-
-        # print vocab file
         if write_vocab:
             with open(os.path.join(self.model_root, "vocab.txt"), 'w+') as of:
                 for i in range(len(wids_rev)):
@@ -213,78 +218,78 @@ class DTMCreator:
         # if we need to merge years, then it is done through the years_per_step var
         if self.years_per_step != 1:
             self.year_mapping = self._get_year_batches()
-        for idx, doc in enumerate(self.paras_processed):
+        final_df_mask = []
+        for idx, doc in enumerate(self.df['preproc_para']):
             token = [w for s in doc for w in s if w in self.wcounts]
             type_counts = Counter(token)
             # PREPROCESS: at least 15 token and >5 types per document
-            if len(token)>15 and len(type_counts)>5: 
+            if len(token)>15 and len(type_counts)>5:
                 id_counts = [f"{len(type_counts)}"]+[f"{wids[k]}:{v}" for k,v in type_counts.most_common()]
                 self.paras_to_wordcounts.append(' '.join(id_counts))
+                final_df_mask.append(True)
                 if self.years_per_step != 1:
-                    self.years_final.append(self.year_mapping[self.rdates[idx]])
+                    self.years_final.append(self.year_mapping[self.df['year'].iloc[idx]])
                 else:
-                    self.years_final.append(self.rdates[idx])
-                self.doc_id_order.append(self.doc_ids[idx])
-        # if enable_downsampling:
-        #     self._downsample(ds_lower_limit)
-        # if enable_upsampling:
-        #     self._upsample(us_upper_limit)
+                    self.years_final.append(self.df['year'].iloc[idx])
+            else:
+                final_df_mask.append(False)
+        self.df = self.df[final_df_mask]
 
-    def _upsample(self, limit=200):
-        """
-        Here we upsample instead of down
-        """
-        year_counts = Counter(self.years_final)
-        tmp_data_struct = defaultdict(lambda: [])
-        # add to tmp struct 
-        for year, doc in zip(self.years_final, self.paras_to_wordcounts):
-            tmp_data_struct[year].append(doc)
-        for year, count in year_counts.items():
-            if count < limit:
-                # upsample
-                curr_year_docs = tmp_data_struct[year]
-                # randomly assign the upper_limit number of documents to the year that exceeds it.
-                i = count
-                while i < limit:
-                    rand_idx = random.RandomState(SEED).randint(0,count)
-                    curr_year_docs.append(curr_year_docs[rand_idx])
-                    i += 1
-        years_final = []
-        paras_to_wordcounts = []
-        for year, docs in tmp_data_struct.items():
-            years_final.extend([year for _ in range(len(docs))])
-            paras_to_wordcounts.extend(docs)
-        self.years_final = years_final
-        self.paras_to_wordcounts = paras_to_wordcounts
+    # def _upsample(self, limit=200):
+    #     """
+    #     Here we upsample instead of down
+    #     """
+    #     year_counts = Counter(self.years_final)
+    #     tmp_data_struct = defaultdict(lambda: [])
+    #     # add to tmp struct 
+    #     for year, doc in zip(self.years_final, self.paras_to_wordcounts):
+    #         tmp_data_struct[year].append(doc)
+    #     for year, count in year_counts.items():
+    #         if count < limit:
+    #             # upsample
+    #             curr_year_docs = tmp_data_struct[year]
+    #             # randomly assign the upper_limit number of documents to the year that exceeds it.
+    #             i = count
+    #             while i < limit:
+    #                 rand_idx = random.RandomState(SEED).randint(0,count)
+    #                 curr_year_docs.append(curr_year_docs[rand_idx])
+    #                 i += 1
+    #     years_final = []
+    #     paras_to_wordcounts = []
+    #     for year, docs in tmp_data_struct.items():
+    #         years_final.extend([year for _ in range(len(docs))])
+    #         paras_to_wordcounts.extend(docs)
+    #     self.years_final = years_final
+    #     self.paras_to_wordcounts = paras_to_wordcounts
 
-    def _downsample(self, limit=1000):
-        """
-        This function is used to downsample years where there are more than the limit number of documents.
-        This will avoid oversampling certain years and hence skewing the models in favour of those years.
-        This is typical behaviour for journals dataset, which has a lot more documents in the later years
-        than earlier.
-        """
-        year_counts = Counter(self.years_final)
-        tmp_data_struct = defaultdict(lambda: [])
-        # add to tmp struct 
-        for year, doc in zip(self.years_final, self.paras_to_wordcounts):
-            tmp_data_struct[year].append(doc)
-        for year, count in year_counts.items():
-            if count > limit:
-                # downsample
-                curr_year_docs = tmp_data_struct[year]
-                # randomly assign the upper_limit number of documents to the year that exceeds it.
-                rand_indexes = [idx for idx in random.RandomState(SEED).permutation(count)][:limit]
-                tmp_data_struct[year] = [curr_year_docs[i] for i in rand_indexes]
-        years_final = []
-        paras_to_wordcounts = []
-        for year, docs in tmp_data_struct.items():
-            years_final.extend([year for _ in range(len(docs))])
-            paras_to_wordcounts.extend(docs)
-        self.years_final = years_final
-        self.paras_to_wordcounts = paras_to_wordcounts
+    # def _downsample(self, limit=1000):
+    #     """
+    #     This function is used to downsample years where there are more than the limit number of documents.
+    #     This will avoid oversampling certain years and hence skewing the models in favour of those years.
+    #     This is typical behaviour for journals dataset, which has a lot more documents in the later years
+    #     than earlier.
+    #     """
+    #     year_counts = Counter(self.years_final)
+    #     tmp_data_struct = defaultdict(lambda: [])
+    #     # add to tmp struct 
+    #     for year, doc in zip(self.years_final, self.paras_to_wordcounts):
+    #         tmp_data_struct[year].append(doc)
+    #     for year, count in year_counts.items():
+    #         if count > limit:
+    #             # downsample
+    #             curr_year_docs = tmp_data_struct[year]
+    #             # randomly assign the upper_limit number of documents to the year that exceeds it.
+    #             rand_indexes = [idx for idx in random.RandomState(SEED).permutation(count)][:limit]
+    #             tmp_data_struct[year] = [curr_year_docs[i] for i in rand_indexes]
+    #     years_final = []
+    #     paras_to_wordcounts = []
+    #     for year, docs in tmp_data_struct.items():
+    #         years_final.extend([year for _ in range(len(docs))])
+    #         paras_to_wordcounts.extend(docs)
+    #     self.years_final = years_final
+    #     self.paras_to_wordcounts = paras_to_wordcounts
 
-    def write_dtm(self, min_year=None, max_year=None):
+    def write_dtm(self, min_year=None, max_year=None, write_csv=False):
         """Write the mult.dat and seq.dat and year.dat files needed to fit the DTM
 
         Args:
@@ -304,8 +309,8 @@ class DTMCreator:
         yearcount = defaultdict(lambda:0)
 
         if self.years_per_step == 1:
-            min_date = min_year if min_year else min(self.dates)
-            max_date = max_year if max_year else max(self.dates)
+            min_date = min_year if min_year else min(self.df['year'])
+            max_date = max_year if max_year else max(self.df['year'])
         else:
             min_date = min(self.year_mapping.values())
             max_date = max(self.year_mapping.values())
@@ -316,16 +321,18 @@ class DTMCreator:
                     yearcount[year]+=1
                     outyear.write(f"{str(yy)}\n")
                     outmult.write(f"{self.paras_to_wordcounts[idx]}\n")
-                    ordered_doc_ids.append(self.doc_id_order[idx])
+                    ordered_doc_ids.append(idx)
                     # outdocids.write(f"{str(self.doc_id_order[idx])}\n")
 
         outseq.write(f"{len(yearcount)}\n")
         for year in sorted(yearcount.keys()):
             outseq.write(f"{yearcount[year]}\n")
             year_dict[len(year_dict)]=year
-        out_df = self.df.iloc[ordered_doc_ids].reindex(index=ordered_doc_ids)
-        out_df['index'] = out_df.index
-        out_df['index'].to_csv(os.path.join(self.model_root, "doc_by_year_map.csv"))
+        self.df = self.df.iloc[ordered_doc_ids]
+        self.df[self.doc_id_col_name].to_csv(os.path.join(self.model_root, "doc_ids.csv"), index=False)
+        if write_csv:
+            self.df.to_csv(os.path.join(self.model_root, "preproc_corpus.csv"), index=False)
+
         outyear.close()
         outmult.close()
         outseq.close()
@@ -434,5 +441,5 @@ if __name__ == "__main__":
     # create_model_inputs("tom_test", os.path.join(os.environ['HANSARD'], "coal_data", "04_model_inputs", "coal_full_downloaded.csv"), text_col_name="main_text", date_col_name="date", bigram=False, limit=100)
     # create_mult_datasets()
     # fit_mult_datasets()
-    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_min_freq_150_12_09_21_wtf"))
+    fit_mult_model(os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_last_20_years_min_freq_80_21_09_21"))
     # fit_one()
