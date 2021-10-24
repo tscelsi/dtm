@@ -20,7 +20,7 @@ import gensim
 import gensim.downloader
 from collections import Counter, defaultdict
 import matplotlib.pylab as plt
-from visualisation import time_evolution_plot, plot_word_ot
+from .visualisation import time_evolution_plot, plot_word_ot, plot_word_topic_evolution_ot
 from pprint import pprint
 import seaborn as sns
 from spacy.matcher import PhraseMatcher
@@ -31,27 +31,7 @@ WHITELIST_EUROVOC_LABELS_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eur
 EUROVOC_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_export_en.csv")
 
 class DTMAnalysis:
-
-    topic_cluster_mapping = {
-        "0421 parliament": "Legislation",
-        "0431 politics and public safety": "Legislation",
-        "0806 international affairs": "Global",
-        "0816 international security": "Global",
-        "1611 economic conditions": "Economic",
-        "1616 regions and regional policy": "Other",
-        "2016 trade": "Economic",
-        "2021 international trade": "Economic",
-        "2411 monetary economics": "Economic",
-        "5206 environmental policy": "Environment",
-        "5211 natural environment": "Environment",
-        "5216 deterioration of the environment": "Environment",
-        # "6606 energy policy",
-        "6611 coal and mining industries": "Fossil Fuels",
-        "6616 oil industry": "Fossil Fuels",
-        "6621 electrical and nuclear industries": "Industrial",
-        "6816 iron, steel and other metal industries": "Industrial"
-    }
-
+    
     eurovoc_label_correction_map = {
         "6626 soft energy": "6626 renewable energy",
         "6616 oil industry": "6616 oil and gas industry"
@@ -74,7 +54,7 @@ class DTMAnalysis:
         self, 
         ndocs, 
         ntopics, 
-        model_root="/data/greyroads/energy-roadmap/DTM/greyroads_steo", 
+        model_root, 
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
@@ -89,10 +69,10 @@ class DTMAnalysis:
         self.ntopics = ntopics
         self.eurovoc_path = eurovoc_path if eurovoc_path else EUROVOC_PATH
         self.whitelist_path = whitelist_path if whitelist_path else WHITELIST_EUROVOC_LABELS_PATH
-        self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping else self.eurovoc_label_remapping
+        self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping != None else self.eurovoc_label_remapping
         self.eurovoc_whitelist = eurovoc_whitelist
         if self.eurovoc_whitelist:
-            self.whitelist_eurovoc_labels = [x.strip() for x in open(self.whitelist_path, "r").readlines()]
+            self.whitelist_eurovoc_labels = [x.strip().lower() for x in open(self.whitelist_path, "r").readlines()]
         self.model_root = model_root
         self.model_out_dir = model_out_dir
         self.gam_path = os.path.join(self.model_root, self.model_out_dir, "lda-seq", "gam.dat")
@@ -267,7 +247,8 @@ class DTMAnalysis:
         row for each year-topic combination along with its proportion of
         occurrence that year.
         """
-        topic_names = self.get_topic_names()
+        topic_names = self.get_topic_names(stringify=False, _type="embedding")
+        # topic_names = str([[re.sub(r"\d{4} ", "", x) for x,_ in topic_name] for topic_name in topic_names])
         # Here I have begun working on retrieving the importance of topics over
         # time. That is, the Series topic_proportions_per_year contains the
         # importance of each topic for particular years.
@@ -277,14 +258,15 @@ class DTMAnalysis:
             if merge_topics:
                 merged_topics = Counter()
                 for topic_idx, topic in enumerate(topic_props):
-                    curr_topic_name = re.search(r"(\d{4} .*?)\d+", topic_names[topic_idx]).group(1)
-                    merged_topics.update({self.topic_cluster_mapping[curr_topic_name] : topic})
+                    curr_topic_name = re.search(r"^\d{4} (.*)$", topic_names[topic_idx][0][0]).group(1)
+                    merged_topics.update({curr_topic_name : topic})
                 for topic_idx, [topic_name, proportion] in enumerate(merged_topics.items()):
                     for_df.append([year, topic_idx, proportion, topic_name])
             else:
                 for topic_idx, topic in enumerate(topic_props):
                     if include_names:
-                        for_df.append([year, topic_idx, topic, str(topic_names[topic_idx])])
+                        curr_topic_name = re.search(r"^\d{4} (.*)$", topic_names[topic_idx][0][0]).group(1)
+                        for_df.append([year, topic_idx, topic, curr_topic_name + "(" + str(topic_idx) + ")"])
                     else:
                         for_df.append([year, topic_idx, topic, str(topic_idx)])
         topic_proportions_df = pd.DataFrame(for_df, columns=["year", "topic", "proportion", "topic_name"])
@@ -295,9 +277,17 @@ class DTMAnalysis:
         # topic_proportions_df = pd.DataFrame(zip(self.years, topic_proportions_per_year), columns=["year", "topic", "proportion", "topic_name"])
         return topic_proportions_df
 
-    def create_plottable_topic_proportion_ot_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False):
+    def create_plottable_topic_proportion_ot_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False, limit=2020):
         df = self.create_topic_proportions_per_year_df(remove_small_topics, threshold, merge_topics=merge_topics, include_names=include_names)
+        df = df[df['year'] <= limit]
         df = df.pivot(index='year', columns='topic_name', values='proportion')
+        return df
+    
+    def get_single_topic_proportions_ot(self, topic_idx):
+        df = self.create_plottable_topic_proportion_ot_df(include_names=False)
+        max_val = df.max().max()
+        df = df.loc[:,str(topic_idx)]
+        df = df / df.sum() * 100
         return df
 
     def _create_eurovoc_label_term_map(self):
@@ -401,16 +391,17 @@ class DTMAnalysis:
         if isinstance(self.eurovoc, type(None)):
             self._init_eurovoc()
         if not self.embeddings:
-            self._init_embeddings(True, save=False)
+            self._init_embeddings(False, save=False)
         words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
         word_probs = np.array([x for (x,_) in top_words])
         word_vecs = []
+        unweighted_word_vecs = []
         for i,w in enumerate(words):
             vec = self._get_vector_from_tokens(w)
             if type(vec) != list:
                 word_vecs.append(vec*word_probs[i])
-        # word_vecs = np.array(word_vecs)*word_probs[:,np.newaxis]
-        word_vec = np.array(word_vecs).mean(axis=0).reshape(1,-1)
+        word_vecs = np.array(word_vecs)
+        word_vec = word_vecs.mean(axis=0).reshape(1,-1)
         for i, topic in enumerate(self.embedding_matrix):
             # pairwise cosine sim between top words and topic term vectors
             topic_mat = np.array(topic)
@@ -429,10 +420,11 @@ class DTMAnalysis:
         else:
             print("score_type needs to be one of either tfidf|embedding")
             sys.exit(1)
-        if stringify:
-            return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
-        elif return_raw_scores:
+        # raw scores takes precedence over stringifying
+        if return_raw_scores:
             return weighted_ev_topics
+        elif stringify:
+            return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
         else:
             return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
 
@@ -522,6 +514,30 @@ class DTMAnalysis:
             all_ev_topics.append(ev_topics)
         return all_ev_topics
 
+    def get_label_names_for_topic_ot(self, topic_idx, return_type="matrix", normalised=True, n=10):
+        if isinstance(self.eurovoc, type(None)):
+            self._init_eurovoc()
+        word_dist_arr_ot = self.get_topic_word_distributions_ot(topic_idx)
+        top_words_ot = self.get_words_for_topic(word_dist_arr_ot, over_time=True, n=n)
+        label_names = []
+        for tw in top_words_ot:
+            topic_scores = self.get_auto_topic_name(tw, topic_idx, score_type="embedding", return_raw_scores=True)
+            total_score = sum(topic_scores.values())
+            if return_type == "matrix":
+                    if normalised:
+                        label_names.append(np.array([topic_scores[topic]/total_score for topic in self.eurovoc_topics]))
+                    else:
+                        label_names.append(np.array([topic_scores[topic] for topic in self.eurovoc_topics]))
+            else:
+                if normalised:
+                    label_names.append(dict([(l, score / total_score) for l,score in topic_scores.items()]))
+                else:
+                    label_names.append(topic_scores)
+        if return_type == "matrix":
+            return np.array(label_names)                
+        return label_names
+
+
     def get_topic_names(self, detailed=False, stringify=True, tfidf_enabled=True, _type="tfidf", raw=False, n=10):
         """
         
@@ -560,7 +576,7 @@ class DTMAnalysis:
             self.top_word_arr.append(self.get_words_for_topic(word_dist_arr, timestep_proportions=_proportions, weighted=True, **kwargs))
         return self.top_word_arr
 
-    def get_words_for_topic(self, word_dist_arr_ot, n=10, descending=True, with_prob=True, weighted=True, timestep_proportions=None, rescaled=True):
+    def get_words_for_topic(self, word_dist_arr_ot, n=10, with_prob=True, weighted=True, timestep_proportions=None, rescaled=True, over_time=False):
         """
         This function takes in an NUM_YEARSxLEN_VOCAB array/matrix that
         represents the vocabulary distribution for each year a topic is
@@ -583,6 +599,20 @@ class DTMAnalysis:
         Returns: Either a list of strings or a list of tuples (float, string)
         representing the summed probability of a particular word.
         """
+        if over_time:
+            top_words = []
+            for timestep_vocab in word_dist_arr_ot:
+                timestep_sorted = timestep_vocab.argsort()
+                timestep_sorted = np.flip(timestep_sorted)
+                timestep_top_words = [self.index_to_word[i] for i in timestep_sorted[:n]]
+                timestep_top_pw = [timestep_vocab[i] for i in timestep_sorted[:n]]
+                if with_prob and rescaled:
+                    total = sum(timestep_top_pw)
+                    rescaled_probs = [x/total for x in timestep_top_pw]
+                    top_words.append([(i, j) for i,j in zip(rescaled_probs, timestep_top_words)])
+                else:
+                    top_words.append(timestep_top_words)
+            return top_words
         if weighted and not type(timestep_proportions) == np.ndarray:
             print("need to specify the timestep proportions to use in weighting with timestep_proportions attribute.")
             sys.exit(1)
@@ -596,8 +626,7 @@ class DTMAnalysis:
         else:
             acc = np.sum(word_dist_arr_ot, axis=0)
         word_dist_arr_sorted = acc.argsort()
-        if descending:
-            word_dist_arr_sorted = np.flip(word_dist_arr_sorted)
+        word_dist_arr_sorted = np.flip(word_dist_arr_sorted)
         top_pw = [acc[i] for i in word_dist_arr_sorted[:n]]
         top_words = [self.index_to_word[i] for i in word_dist_arr_sorted[:n]]
         if with_prob and rescaled:
@@ -669,18 +698,25 @@ class DTMAnalysis:
             sel2 = sel2.sort_values(by='peak_pos', axis=1)
             sel2 = sel2.drop('peak_pos')
             return sel2.columns
-        else:
-            return pd.Index([str(y) for y in sorted([int(x) for x in df.columns])])
+        try:
+            columns = sorted([int(x) for x in df.columns])
+        except:
+            columns = sorted(df.columns)
+        return pd.Index([str(y) for y in columns])
     
-    def plot_topics_ot(self, save_path, save=True, sort_by="peak_pos"):
-        df_scores = self.create_plottable_topic_proportion_ot_df(include_names=False)
+    def plot_topics_ot(self, save_path, save=True, sort_by="peak_pos", keep=None, include_names=False, scale=0.75, merge_topics=False):
+        df_scores = self.create_plottable_topic_proportion_ot_df(include_names=include_names, merge_topics=merge_topics)
         for i in df_scores.index:
             df_scores.loc[i] = df_scores.loc[i] / df_scores.loc[i].sum() * 100
         sorted_selection = self._get_sorted_columns(df_scores, sort_by)
-        plt = time_evolution_plot(df_scores[sorted_selection], save_path, scale=0.75, save=save)
+        if keep:
+            df_scores = df_scores[sorted_selection].loc[:,[str(x) for x in keep]]
+        else:
+            df_scores = df_scores[sorted_selection]
+        plt = time_evolution_plot(df_scores, save_path, scale=scale, save=save)
         return plt
-    
-    def plot_words_from_topic(self, topic_idx, words, title, save_path=None):
+
+    def plot_words_ot_from_topic(self, topic_idx, words, title, save_path=None, plot=True):
         try:
             word_indexes = []
             for word in words:
@@ -695,8 +731,33 @@ class DTMAnalysis:
         plot_df = pd.DataFrame(word_ot, columns=words)
         plot_df['year'] = self.years
         plot_df = plot_df.set_index('year')
-        plt = plot_word_ot(plot_df, title, save_path=save_path)
-        return plt
+        if plot:
+            plt = plot_word_ot(plot_df, title, save_path=save_path)
+            return plot_df, plt
+        else:
+            return plot_df
+    
+    def plot_labels_ot_from_topic(self, topic_idx, labels, title, save_path=None, plot=True, n=10):
+        plot_df = pd.DataFrame(columns=["year", "label", "value"])
+        label_names_ot = self.get_label_names_for_topic_ot(topic_idx, normalised=True, n=n)
+        for label in labels:
+            index = self.eurovoc_topics.index(label)
+            subbed_label = re.sub(r"\d{4} ", "", label)
+            labels = [subbed_label] * len(self.years)
+            tmp_df = pd.DataFrame(data={"year": self.years, "label": labels, "value": label_names_ot[:,index]})
+            plot_df = plot_df.append(tmp_df, ignore_index=True)
+        return plot_df
+
+    
+    def plot_words_ot_with_proportion(self, topics, wordlist, titles, figsize=None, save_path=None):
+        assert len(topics) == len(wordlist) == len(titles)
+        dfs_to_plot = []
+        for topic, words in zip(topics, wordlist):
+            words_df = self.plot_words_ot_from_topic(topic, words, None, plot=False)
+            props_df = self.get_single_topic_proportions_ot(topic)
+            words_df['_prop'] = props_df
+            dfs_to_plot.append(words_df)
+        plot_word_topic_evolution_ot(dfs_to_plot, titles, figsize=figsize, save_path=save_path)
         
 
 def compare_coherences(dataset_root, analysis_folder):
@@ -745,22 +806,42 @@ def compare_dataset_coherences():
     print("==========")
 
 if __name__ == "__main__":
-    NDOCS = 7317 # number of lines in -mult.dat file.
+    NDOCS = 2686 # number of lines in -mult.dat file.
     NTOPICS = 30
-    tdma = DTMAnalysis(
-        NDOCS, 
-        NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_last_20_years_min_freq_80_12_09_21"),
+    # tdma = DTMAnalysis(
+    #     NDOCS, 
+    #     NTOPICS,
+    #     model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "final_datasets", "greyroads_aeo_min_freq_40_1997_2020_ngram"),
+    #     doc_year_map_file_name="model-year.dat",
+    #     seq_dat_file_name="model-seq.dat",
+    #     vocab_file_name="vocab.txt",
+    #     model_out_dir="k30_a0.01_var0.05",
+    #     eurovoc_whitelist=True,
+    #     )
+    # topic_names = tdma.get_topic_names(_type="embedding", stringify=False, raw=True)
+    whitelist_label_path = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_labels_merged.txt")
+    analysis = DTMAnalysis(
+        2686, 
+        30,
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "final_datasets", "greyroads_aeo_min_freq_40_1997_2020_ngram"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
         model_out_dir="k30_a0.01_var0.05",
         eurovoc_whitelist=True,
-        eurovoc_label_remapping=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "remapping.json"),
-        whitelist_path=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "eurovoc_labels_merged.txt")
+        whitelist_path=whitelist_label_path,
         )
-    # topic_names = tdma.get_topic_names(_type="embedding", stringify=False)
-    # names = tdma.get_topic_names(_type="embedding", raw=True, stringify=False)
+    # res = analysis.get_topic_names_for_topic_ot(0)
+    # res = analysis.plot_labels_ot_from_topic(0, ["5206 environmental policy", "5211 natural environment"], "hello")
+
+    # analysis._init_eurovoc()
+    # analysis.plot_topics_ot(os.path.join(os.environ['DTM_ROOT'], "dtm", "final_datasets", "greyroads_ieo_min_freq_40_1997_2020_ngram", "DANG.png"), scale=1.2, include_names=True, sort_by="col")
+    emb_labels = analysis.get_topic_names(_type="embedding", raw=True)
+    tfidf_labels = analysis.get_topic_names(_type="tfidf", raw=True)
+    # topics = [0,26]
+    # words = [['coal', 'natural_gas', 'renewable', 'nuclear', 'solar'], ['cpp', 'cair']]
+    # tdma.plot_words_topic_ot(topics, words)
+    # tdma.plot_topics_ot(os.path.join(os.environ['ROADMAP_SCRAPER'], "figures", "aeo", "topics_ot.png"), scale=1.1, sort_by="topicnum", keep=[0,1,3,6,8,11,12,16,19,22,24,26])
     # tdma._init_eurovoc()
     # tdma._init_embeddings(load=False, save=True)
     # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
