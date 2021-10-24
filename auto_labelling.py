@@ -41,6 +41,9 @@ class AutoLabel:
 
         Args:
             thesaurus (pd.DataFrame | dict): A thesaurus-like object mapping phrases to labels.
+            phrase_col (str): Only applies when thesaurus is a dataframe. A string representing the column name in the thesaurus dataframe that pertains to the phrases.
+            label_col (str): Only applies when thesaurus is a dataframe. A string representing the column name in the thesaurus dataframe that pertains to the labels.
+            spacy_lang (str): spaCy language to use for tokenisation
         """
         self.nlp = spacy.load(spacy_lang)
         if isinstance(thesaurus, dict):
@@ -82,35 +85,16 @@ class AutoLabel:
             self.phrase_embeddings.append(term_vec_matrix)
         self.phrase_embeddings = np.array(self.phrase_embeddings)
 
-    def _init_embeddings(self, load_embeddings, save_embeddings=True, phrase_embedding_path="phrase_embeddings.pickle", emb_type='glove-wiki-gigaword-50'):
+    def _init_embeddings(self, emb_type='glove-wiki-gigaword-50'):
         """This function creates a class-accessible embedding matrix of the phrases under each label in the thesaurus. For more information
         see _create_phrase_embeddings function.
 
         Args:
-            load_embeddings (bool): Whether to load the phrase embeddings from phrase_embedding_path
-            save_embeddings (bool, optional): Whether to save the phrase embeddings to phrase_embedding_path. Only checked if load is False. Defaults to True.
-            phrase_embedding_path (str, optional): The path with which to load or save the phrase embeddings. Defaults to "phrase_embeddings.pickle".
             emb_type (str, optional): string outlining which gensim pre-trained embeddings to use. Defaults to 'glove-wiki-gigaword-50'.
         """
         print("Initialising gloVe embeddings...")
         self.embeddings = gensim.downloader.load(emb_type)
-        if not load_embeddings:
-            self._create_phrase_embeddings()
-            if save_embeddings and (not phrase_embedding_path):
-                print("If you want to save the embeddings, you need to provide a phrase_embedding_path value.")
-            elif save_embeddings and phrase_embedding_path:
-                with open(phrase_embedding_path, "wb+") as fp:
-                    pickle.dump(self.phrase_embeddings, fp)
-        elif load_embeddings and not phrase_embedding_path:
-            print("If loading the eurovoc embeddings matrix, you need to provide a path for the embedding matrix.")
-            sys.exit(1)
-        elif load_embeddings:
-            try:
-                with open(phrase_embedding_path, "rb") as fp:
-                    self.phrase_embeddings = np.array(pickle.load(fp))
-            except Exception as e:
-                print("Try setting load_embeddings=False, save=True to save your initialised embeddings for future use")
-                sys.exit(1)
+        self._create_phrase_embeddings()
 
     def _create_label_phrase_docs(self):
         """This function aggregates all the phrases for a particular label into a 'document'

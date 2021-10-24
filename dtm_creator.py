@@ -235,60 +235,6 @@ class DTMCreator:
                 final_df_mask.append(False)
         self.df = self.df[final_df_mask]
 
-    # def _upsample(self, limit=200):
-    #     """
-    #     Here we upsample instead of down
-    #     """
-    #     year_counts = Counter(self.years_final)
-    #     tmp_data_struct = defaultdict(lambda: [])
-    #     # add to tmp struct 
-    #     for year, doc in zip(self.years_final, self.paras_to_wordcounts):
-    #         tmp_data_struct[year].append(doc)
-    #     for year, count in year_counts.items():
-    #         if count < limit:
-    #             # upsample
-    #             curr_year_docs = tmp_data_struct[year]
-    #             # randomly assign the upper_limit number of documents to the year that exceeds it.
-    #             i = count
-    #             while i < limit:
-    #                 rand_idx = random.RandomState(SEED).randint(0,count)
-    #                 curr_year_docs.append(curr_year_docs[rand_idx])
-    #                 i += 1
-    #     years_final = []
-    #     paras_to_wordcounts = []
-    #     for year, docs in tmp_data_struct.items():
-    #         years_final.extend([year for _ in range(len(docs))])
-    #         paras_to_wordcounts.extend(docs)
-    #     self.years_final = years_final
-    #     self.paras_to_wordcounts = paras_to_wordcounts
-
-    # def _downsample(self, limit=1000):
-    #     """
-    #     This function is used to downsample years where there are more than the limit number of documents.
-    #     This will avoid oversampling certain years and hence skewing the models in favour of those years.
-    #     This is typical behaviour for journals dataset, which has a lot more documents in the later years
-    #     than earlier.
-    #     """
-    #     year_counts = Counter(self.years_final)
-    #     tmp_data_struct = defaultdict(lambda: [])
-    #     # add to tmp struct 
-    #     for year, doc in zip(self.years_final, self.paras_to_wordcounts):
-    #         tmp_data_struct[year].append(doc)
-    #     for year, count in year_counts.items():
-    #         if count > limit:
-    #             # downsample
-    #             curr_year_docs = tmp_data_struct[year]
-    #             # randomly assign the upper_limit number of documents to the year that exceeds it.
-    #             rand_indexes = [idx for idx in random.RandomState(SEED).permutation(count)][:limit]
-    #             tmp_data_struct[year] = [curr_year_docs[i] for i in rand_indexes]
-    #     years_final = []
-    #     paras_to_wordcounts = []
-    #     for year, docs in tmp_data_struct.items():
-    #         years_final.extend([year for _ in range(len(docs))])
-    #         paras_to_wordcounts.extend(docs)
-    #     self.years_final = years_final
-    #     self.paras_to_wordcounts = paras_to_wordcounts
-
     def write_dtm(self, min_year=None, max_year=None, write_csv=False):
         """Write the mult.dat and seq.dat and year.dat files needed to fit the DTM
 

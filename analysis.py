@@ -21,12 +21,14 @@ import gensim
 import gensim.downloader
 from collections import Counter, defaultdict
 import matplotlib.pylab as plt
-from .visualisation import time_evolution_plot, plot_word_ot, plot_word_topic_evolution_ot
+from visualisation import time_evolution_plot, plot_word_ot, plot_word_topic_evolution_ot
 from pprint import pprint
 import seaborn as sns
 from spacy.matcher import PhraseMatcher
 from spacy.tokens import Doc
 import spacy
+from eurovoc import Eurovoc
+from auto_labelling import AutoLabel
 
 WHITELIST_EUROVOC_LABELS_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_labels_merged.txt")
 EUROVOC_PATH = os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_export_en.csv")
@@ -60,37 +62,23 @@ class DTMAnalysis:
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
         model_out_dir="model_run",
-        eurovoc_whitelist=True,
-        eurovoc_path=None,
-        eurovoc_label_remapping=None,
-        whitelist_path=None,
+        thesaurus=None,
+        spacy_lang="en_core_web_sm"
         ):
-        self.nlp = spacy.load("en_core_web_sm")
+        self.nlp = spacy.load(spacy_lang)
         self.ndocs = ndocs
         self.ntopics = ntopics
-        self.eurovoc_path = eurovoc_path if eurovoc_path else EUROVOC_PATH
-        self.whitelist_path = whitelist_path if whitelist_path else WHITELIST_EUROVOC_LABELS_PATH
-        self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping != None else self.eurovoc_label_remapping
-        # if we're passed a string, let's try load it as a json obj. if this doesn't work, throw error
-        if isinstance(self.eurovoc_label_remapping, str):
-            try:
-                with open(self.eurovoc_label_remapping, "r") as fp:
-                    self.eurovoc_label_remapping = json.load(fp)
-            except FileNotFoundError:
-                print("The remapping string that was passed didn't lead to a json file with a EuroVoc remapping.\
-                     Try changing the path, or remove the eurovoc_label_remapping argument.")
-                sys.exit(1)
-        self.eurovoc_whitelist = eurovoc_whitelist
-        if self.eurovoc_whitelist:
-            self.whitelist_eurovoc_labels = [x.strip().lower() for x in open(self.whitelist_path, "r").readlines()]
+        if thesaurus:
+            self.thesaurus = thesaurus
+        else:
+            # defaults to Eurovoc as per original paper
+            self.thesaurus = Eurovoc(eurovoc_whitelist=True).eurovoc
+        self.auto_labelling = AutoLabel(self.thesaurus, phrase_col="TERMS (PT-NPT)", label_col="MT", spacy_lang=spacy_lang)
         self.model_root = model_root
         self.model_out_dir = model_out_dir
         self.gam_path = os.path.join(self.model_root, self.model_out_dir, "lda-seq", "gam.dat")
         self.doc_year_map_path = os.path.join(self.model_root, doc_year_map_file_name)
         self.seq_dat = os.path.join(self.model_root, seq_dat_file_name)
-        self.eurovoc = None
-        self.eurovoc_topics = None
-        self.embeddings = None
         self.topic_prefix = "topic-"
         self.topic_suffix = "-var-e-log-prob.dat"
         
@@ -129,25 +117,6 @@ class DTMAnalysis:
         # check to see that we have the same counts of yearly docs as the seq-dat file
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
-    def change_model(self, model_out_dir, n_topics):
-        self.model_out_dir = model_out_dir
-        self.ntopics = n_topics
-        self.gam_path = os.path.join(self.model_root, self.model_out_dir, "lda-seq", "gam.dat")
-        self.gammas = open(self.gam_path, "r").read().splitlines()
-        assert len(self.gammas) == self.ndocs * self.ntopics
-
-        # let's change the gammas into a nicer form, from a 1d array of length self. * ntopics
-        # to a 2d array of shape (ndocs, ntopics)
-
-        self.gammas = np.reshape(self.gammas, (self.ndocs, self.ntopics)).astype(np.double)
-        assert len(self.gammas[0]) == self.ntopics
-        # let's create a dataframe where each row is a document, with its topic
-        # distribution and year of publication
-        self.doc_topic_gammas = pd.DataFrame(zip(self.gammas, self.doc_year_mapping), columns=["topic_dist", "year"])
-
-        # check to see that we have the same counts of yearly docs as the seq-dat file
-        assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
-
     def save_gammas(self, save_path, split=True):
         doc_ids = pd.read_csv(os.path.join(self.model_root, "doc_ids.csv"))
         assert len(doc_ids) == len(self.doc_topic_gammas)
@@ -160,82 +129,6 @@ class DTMAnalysis:
         else:
             self.doc_topic_gammas['doc_id'] = doc_ids['doc_id']
             self.doc_topic_gammas.to_csv(save_path)
-
-    # def _create_eurovoc_embedding_matrix(self):
-    #     """This function creates an K x T_k x gloVedims embedding matrix where K is the number of eurovoc labels in the thesaurus,
-    #     T_k is the number of terms for a eurovoc label k and gloVedims is the dimensions of the pre-trained gloVe word embeddings as per gensim docs.
-
-    #     To create this matrix this function iterates through the terms of a eurovoc label 
-    #     """
-    #     self.label_term_map = {}
-    #     self.embedding_matrix = []
-    #     for topic in self.eurovoc_topics:
-    #         mask = self.eurovoc['MT'].apply(lambda x: x.lower()) == topic
-    #         terms = self.nlp.pipe([x.lower() for x in self.eurovoc[mask]['TERMS (PT-NPT)']], n_process=11)
-    #         term_vec_matrix = []
-    #         term_list = []
-    #         for term in terms:
-    #             vec = self._get_vector_from_tokens(term)
-    #             # take average of vectors to achieve embedding for term
-    #             if type(vec) == np.ndarray:
-    #                 term_vec_matrix.append(vec)
-    #                 term_list.append(term.text)
-    #         self.label_term_map[topic] = term_list
-    #         self.embedding_matrix.append(term_vec_matrix)
-    #     self.embedding_matrix = np.array(self.embedding_matrix)
-
-    # def _get_vector_from_tokens(self, tokens):
-    #     vec = []
-    #     for tok in tokens:
-    #         if tok.lemma_ in self.embeddings:
-    #             vec.append(self.embeddings[tok.lemma_])
-    #     if vec:
-    #         vec = np.array(vec).mean(axis=0)
-    #     return vec
-
-    # def _init_embeddings(self, load, save=True, label_term_map_path="whitelist_label_to_term_map.pickle", embedding_matrix_path="whitelist_embedding_matrix.pickle", emb_type='glove-wiki-gigaword-50'):
-    #     print("Initialising gloVe embeddings...")
-    #     self.embeddings = gensim.downloader.load(emb_type)
-    #     if not load:
-    #         self._create_eurovoc_embedding_matrix()
-    #         if save and (not label_term_map_path or not embedding_matrix_path):
-    #             print("If you want to save the embeddings, you need to provide label_term_map_path and embedding_matrix_path values.")
-    #         elif save and label_term_map_path and embedding_matrix_path:
-    #             with open(embedding_matrix_path, "wb+") as fp:
-    #                 pickle.dump(self.embedding_matrix, fp)
-    #             with open(label_term_map_path, "wb+") as fp:
-    #                 pickle.dump(self.label_term_map, fp)
-    #     elif load and (not label_term_map_path or not embedding_matrix_path):
-    #         print("If loading the eurovoc embeddings matrix, you need to provide a path for the label term list and embedding matrix path.")
-    #         sys.exit(1)
-    #     elif load:
-    #         with open(embedding_matrix_path, "rb") as fp:
-    #             self.embedding_matrix = np.array(pickle.load(fp))
-    #         with open(label_term_map_path, "rb") as fp:
-    #             self.label_term_map = pickle.load(fp)
-        
-    def _init_eurovoc(self):
-        print("Initialising EuroVoc...")
-        def preproc(label):
-            lowered_label = label.lower()
-            if lowered_label in self.eurovoc_label_remapping:
-                lowered_label = self.eurovoc_label_remapping[lowered_label]
-            if lowered_label in self.eurovoc_label_correction_map:
-                lowered_label = self.eurovoc_label_correction_map[lowered_label]
-            return lowered_label
-        self.eurovoc = pd.read_csv(self.eurovoc_path)
-        self.eurovoc['MT'] = self.eurovoc['MT'].apply(preproc)
-        # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_remapping[x] if x in self.eurovoc_label_remapping else x)
-        # self.eurovoc['MT'] = self.eurovoc['MT'].apply(lambda x: self.eurovoc_label_correction_map[x] if x in self.eurovoc_label_correction_map else x)
-        # remove non-whitelisted topic terms
-        if self.eurovoc_whitelist:
-            m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_labels, axis=1)
-            self.eurovoc = self.eurovoc[m]
-        self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
-        assert len(self.eurovoc['MT'].drop_duplicates()) == len(self.whitelist_eurovoc_labels)
-        self.eurovoc = self.eurovoc.set_index('index')
-        self._create_eurovoc_label_term_map()
-        # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
 
     def _get_topic_proportions_per_year(self, logged=False):
         """This function returns a pandas DataFrame of years and their corresponding
@@ -254,7 +147,7 @@ class DTMAnalysis:
         topic_proportions_per_year = x.apply(lambda x: get_topic_proportions(x, logged))
         return topic_proportions_per_year
 
-    def create_topic_proportions_per_year_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False):
+    def create_topic_proportions_per_year_df(self, remove_small_topics=False, threshold=0.01, merge_topics=False, include_names=False, **kwargs):
         """
         This function creates a dataframe which eventually will be used for
         plotting topic proportions over time. Similar to the visualisations used
@@ -262,7 +155,7 @@ class DTMAnalysis:
         row for each year-topic combination along with its proportion of
         occurrence that year.
         """
-        topic_names = self.get_topic_names(stringify=False, _type="embedding")
+        topic_names = self.get_topic_names(**kwargs)
         # topic_names = str([[re.sub(r"\d{4} ", "", x) for x,_ in topic_name] for topic_name in topic_names])
         # Here I have begun working on retrieving the importance of topics over
         # time. That is, the Series topic_proportions_per_year contains the
@@ -305,244 +198,18 @@ class DTMAnalysis:
         df = df / df.sum() * 100
         return df
 
-    # def _create_eurovoc_label_term_map(self):
-    #     eurovoc_label_term_map = {}
-    #     self.eurovoc_topic_docs = {}
-    #     for term, topic in zip(self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner'], batch_size=256, n_process=11), self.eurovoc['MT'].apply(lambda x: x.lower())):
-    #         if topic in eurovoc_label_term_map:
-    #             eurovoc_label_term_map[topic].append(term)
-    #         else:
-    #             eurovoc_label_term_map[topic] = [term]
-    #     for topic in eurovoc_label_term_map:
-    #         curr_topic_list = eurovoc_label_term_map[topic]
-    #         c_doc = Doc.from_docs(curr_topic_list, ensure_whitespace=True)
-    #         self.eurovoc_topic_docs[topic] = c_doc
-    #     self.eurovoc_topics = sorted(np.array(list(self.eurovoc_topic_docs.keys())))
-    #     # self.eurovoc_topic_indices = sorted(self.eurovoc_topics)
-
-    # def get_topic_tfidf_scores(self, top_terms, tfidf_enabled=False):
-    #     """
-    #     Returns a matrix for a DTM topic where the rows represent a top term for the dtm topic, and the columns
-    #     represent each EuroVoc topic. Each cell is the tfidf value of a particular term-topic
-    #     combination. This will be used when calculating the automatic EuroVoc topic labels for the
-    #     DTM topics.
-
-    #     i.e. shape is | top_terms | x | EuroVoc Topics |
-    #     """
-    #     self.tfidf_mat = np.zeros((len(top_terms), len(self.eurovoc_topics)))
-    #     # number of documents containing a term
-    #     N = Counter()
-    #     tfs = {}
-    #     doc_lens = {}
-    #     # ensure to get rid of the underscores in bigram terms and then rejoin with space
-    #     # i.e. 'greenhouse_gas' becomes 'greenhouse gas'
-    #     spacy_terms = [t for t in self.nlp.pipe([" ".join(t.split("_")) for _, t in top_terms], disable=['tok2vec', 'ner'], n_process=11)]
-    #     self.raw_term_list = [t.text for t in spacy_terms]
-    #     self.eurovoc_term_matcher = PhraseMatcher(self.nlp.vocab, attr="LEMMA", validate=True)
-    #     for term in spacy_terms:
-    #         self.eurovoc_term_matcher.add(term.text, [term])
-    #     ## term freq
-    #     ## total terms in each topic (doc)
-    #     ## number of docs that match term
-    #     ## total number of docs
-    #     for topic in self.eurovoc_topics:
-    #         term_freq = Counter()
-    #         curr_doc = self.eurovoc_topic_docs[topic]
-    #         doc_len = len(self.eurovoc_topic_docs[topic])
-    #         doc_lens[topic] = doc_len
-    #         terms_contained_in_topic = set()
-    #         matches = self.eurovoc_term_matcher(curr_doc)
-    #         if matches:
-    #             for match_id, _, _ in matches:
-    #                 matched_term = self.nlp.vocab.strings[match_id]
-    #                 terms_contained_in_topic.add(matched_term)
-    #                 term_freq[matched_term] += 1
-    #             tfs[topic] = term_freq
-    #         N.update(terms_contained_in_topic)
-    #     # calculate tfidfs for each term in each topic
-    #     for i, topic in enumerate(self.eurovoc_topics):
-    #         try:
-    #             curr_tfs = tfs[topic]
-    #             doc_len = doc_lens[topic]
-    #             for term in curr_tfs:
-    #                 ind = self.raw_term_list.index(term)
-    #                 tf = curr_tfs[term] / doc_len
-    #                 idf = np.log(len(self.eurovoc_topic_docs.keys()) / N[term])
-    #                 tfidf = tf * idf
-    #                 if tfidf_enabled:
-    #                     self.tfidf_mat[ind][i] = tfidf
-    #                 else:
-    #                     # just idf
-    #                     self.tfidf_mat[ind][i] = idf
-    #         except KeyError as e:
-    #             continue
-    #     return self.tfidf_mat
-    
-    # def _get_eurovoc_scores(self, top_words, tfidf_enabled=True):
-    #     c = Counter()
-    #     terms = Counter()
-    #     top_word_dict = dict([(" ".join(y.split("_")),x) for (x,y) in top_words])
-    #     for i, topic in enumerate(self.eurovoc_topics):
-    #         score = 0
-    #         # topic_ind = np.where(self.eurovoc_topics == topic)[0][0]
-    #         matches = self.eurovoc_term_matcher(self.eurovoc_topic_docs[topic])
-    #         for match_id,_,_ in matches:
-    #             term = self.nlp.vocab.strings[match_id]
-    #             terms[term] += 1
-    #             weight = top_word_dict[term]
-    #             term_ind = self.raw_term_list.index(term)
-    #             tfidf = self.tfidf_mat[term_ind][i]
-    #             # weighting and tf-idf 
-    #             if tfidf_enabled:
-    #                 tmp = weight * tfidf
-    #                 score = score + (weight * tfidf)
-    #             else:
-    #                 score = score + weight
-    #         c.update({topic: score})
-    #     return c
-
-    # def _get_embedding_scores(self, top_words):
-    #     c = Counter()
-    #     if isinstance(self.eurovoc, type(None)):
-    #         self._init_eurovoc()
-    #     if not self.embeddings:
-    #         self._init_embeddings(False, save=False)
-    #     words = [self.nlp(" ".join(w.split("_"))) for _,w in top_words]
-    #     word_probs = np.array([x for (x,_) in top_words])
-    #     word_vecs = []
-    #     unweighted_word_vecs = []
-    #     for i,w in enumerate(words):
-    #         vec = self._get_vector_from_tokens(w)
-    #         if type(vec) != list:
-    #             word_vecs.append(vec*word_probs[i])
-    #     word_vecs = np.array(word_vecs)
-    #     word_vec = word_vecs.mean(axis=0).reshape(1,-1)
-    #     for i, topic in enumerate(self.embedding_matrix):
-    #         # pairwise cosine sim between top words and topic term vectors
-    #         topic_mat = np.array(topic)
-    #         topic_vec = topic_mat.mean(axis=0).reshape(1,-1)
-    #         score = cosine_similarity(word_vec, topic_vec)[0][0]
-    #         # score = np.multiply(scores.squeeze(), word_probs).sum()
-    #         topic_name = self.eurovoc_topics[i]
-    #         c.update({topic_name: score})
-    #     return c
-
-    # def get_auto_topic_name(self, top_words, i, top_n=4, stringify=True, tfidf_enabled=True, return_raw_scores=False, score_type="tfidf"):
-    #     if score_type == "tfidf":
-    #         weighted_ev_topics = self._get_eurovoc_scores(top_words, tfidf_enabled=tfidf_enabled)
-    #     elif score_type == "embedding":
-    #         weighted_ev_topics = self._get_embedding_scores(top_words)
-    #     else:
-    #         print("score_type needs to be one of either tfidf|embedding")
-    #         sys.exit(1)
-    #     # raw scores takes precedence over stringifying
-    #     if return_raw_scores:
-    #         return weighted_ev_topics
-    #     elif stringify:
-    #         return str([(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]) + str(i)
-    #     else:
-    #         return [(k, round(v,2)) for k, v in weighted_ev_topics.most_common(top_n)]
-
-    def _get_baseline_topic_vectors(self, simple=True, zeroed=False, indices=None):
-        """
-        This function returns random scores normalised with a standard scaler. _init_eurovoc needs to run before this function.
-        """
-        topic_vectors = []
-        topic_indices = indices if indices else sorted(self.eurovoc_topics)
-        topic_proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
-        for i in range(self.ntopics):
-            word_dist_arr_ot = self.get_topic_word_distributions_ot(i)
-            topic_proportions_ot = np.array(topic_proportions[:,i])
-            top_words = self.get_words_for_topic(word_dist_arr_ot, n=30, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
-            self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
-            model_ev_scores = self.get_auto_topic_name(top_words, i, stringify=False, tfidf_enabled=False, return_raw_scores=True)
-            topic_vectors.append([model_ev_scores[i] for i in topic_indices])
-        rng = np.random.default_rng()
-        baseline_topic_vectors = np.array(topic_vectors)
-        if simple:
-            # we want to shuffle everything
-            for vec in baseline_topic_vectors:
-                # print(f"before: {vec}")
-                rng.shuffle(vec)
-                # print(f"after: {vec}")
-                # print("-----")
-            return baseline_topic_vectors
-        else:
-            print("INTELLIGENT BASELINE")
-            # we want to only shuffle elements that have score above threshold
-            # shuffle top 5/10 with highest score
-            threshold = np.quantile(baseline_topic_vectors, 0.7)
-            threshold_matrix = []
-            top_ten_matrix = []
-            for topic in baseline_topic_vectors:
-                # get top 10 score indices
-                top_ten_indices = np.argsort(topic)[::-1][:10]
-                top_ten_indices_shuffled = np.copy(top_ten_indices)
-                rng.shuffle(top_ten_indices_shuffled)
-                above_thresh_scores = []
-                for score in topic:
-                    if score > threshold:
-                        above_thresh_scores.append(score)
-                rng.shuffle(above_thresh_scores)
-                if zeroed:
-                    top_ten = np.zeros(shape=topic.shape)
-                else:    
-                    top_ten = np.copy(topic)
-                for i in range(len(top_ten_indices)):
-                    top_ten[top_ten_indices[i]] = topic[top_ten_indices_shuffled[i]] 
-                i = 0
-                # print(f"before: {topic}")
-                threshold_vector = []
-                for score in topic:
-                    if score > threshold:
-                        threshold_vector.append(above_thresh_scores[i])
-                        i += 1
-                    else:
-                        if zeroed:
-                            threshold_vector.append(0)
-                        else:
-                            threshold_vector.append(score)
-                threshold_matrix.append(threshold_vector)
-                top_ten_matrix.append(top_ten)
-                # print(f"after: {np.array(new_arr)}")
-                # print("-----")
-            return np.array(threshold_matrix), np.array(top_ten_matrix)
-
-    def generate_baselines(self, **kwargs):
-        simple_baseline = self._get_baseline_topic_vectors(simple=True, **kwargs)
-        threshold_baseline, top_ten_baseline = self._get_baseline_topic_vectors(simple=False, **kwargs)
-        threshold_baseline_zeroed, top_ten_baseline_zeroed = self._get_baseline_topic_vectors(simple=False, zeroed=True, **kwargs)
-        return simple_baseline, threshold_baseline, top_ten_baseline, threshold_baseline_zeroed, top_ten_baseline_zeroed
-
-    def get_baseline_vec_topic_names(self, vec, top_n=4):
-        """
-        This function generates the topic names for a baseline vector which represents the scores
-        of each of the EuroVoc topics for a particular DTM topic k. That is, how relevant each EuroVoc
-        topic is to k. EuroVoc needs to be initialised for this to function correctly.
-        """
-        if not self.eurovoc_topics:
-            print("need to init eurovoc before calling this function by _init_eurovoc")
-            sys.exit(1)
-        all_ev_topics = []
-        for dtm_topic in vec:
-            ev_topics = [(self.eurovoc_topics[x], round(dtm_topic[x],2)) for x in np.argsort(dtm_topic)[::-1]][:top_n]
-            all_ev_topics.append(ev_topics)
-        return all_ev_topics
-
-    def get_label_names_for_topic_ot(self, topic_idx, return_type="matrix", normalised=True, n=10):
-        if isinstance(self.eurovoc, type(None)):
-            self._init_eurovoc()
+    def get_label_names_for_topic_ot(self, topic_idx, return_type="matrix", normalised=True, n=10, **kwargs):
         word_dist_arr_ot = self.get_topic_word_distributions_ot(topic_idx)
         top_words_ot = self.get_words_for_topic(word_dist_arr_ot, over_time=True, n=n)
         label_names = []
         for tw in top_words_ot:
-            topic_scores = self.get_auto_topic_name(tw, topic_idx, score_type="embedding", return_raw_scores=True)
+            topic_scores = self.auto_labelling._get_auto_topic_name(tw, topic_idx, score_type="embedding", raw=True, **kwargs)
             total_score = sum(topic_scores.values())
             if return_type == "matrix":
                     if normalised:
-                        label_names.append(np.array([topic_scores[topic]/total_score for topic in self.eurovoc_topics]))
+                        label_names.append(np.array([topic_scores[label]/total_score for label in self.auto_labelling.sorted_labels]))
                     else:
-                        label_names.append(np.array([topic_scores[topic] for topic in self.eurovoc_topics]))
+                        label_names.append(np.array([topic_scores[label] for label in self.auto_labelling.sorted_labels]))
             else:
                 if normalised:
                     label_names.append(dict([(l, score / total_score) for l,score in topic_scores.items()]))
@@ -552,13 +219,9 @@ class DTMAnalysis:
             return np.array(label_names)                
         return label_names
 
-
-    def get_topic_names(self, detailed=False, stringify=True, tfidf_enabled=True, _type="tfidf", raw=False, n=10):
+    def get_topic_names(self, _type="tfidf", raw=False, n=10, **kwargs):
         """
-        
         """
-        if isinstance(self.eurovoc, type(None)):
-            self._init_eurovoc()
         topic_names = []
         self.top_word_arr = []
         proportions = np.array(self._get_topic_proportions_per_year(logged=True).tolist())
@@ -569,13 +232,7 @@ class DTMAnalysis:
             top_words = self.get_words_for_topic(word_dist_arr_ot, n=n, with_prob=True, weighted=True, timestep_proportions=topic_proportions_ot)
             # add top words to class object
             self.top_word_arr.append(top_words)
-            if _type == "tfidf":
-                self.get_topic_tfidf_scores(top_words, tfidf_enabled=False)
-            curr_topic_name = self.get_auto_topic_name(top_words, i, stringify=stringify, tfidf_enabled=tfidf_enabled, score_type=_type, return_raw_scores=raw)
-            if detailed:
-                topic_names.append((curr_topic_name, top_words))
-            else:
-                topic_names.append(curr_topic_name)
+        topic_names = self.auto_labelling.get_topic_names(self.top_word_arr, top_n=4, score_type=_type, raw=raw, **kwargs)
         self.topic_names = topic_names
         return topic_names
     
@@ -773,52 +430,7 @@ class DTMAnalysis:
             words_df['_prop'] = props_df
             dfs_to_plot.append(words_df)
         plot_word_topic_evolution_ot(dfs_to_plot, titles, figsize=figsize, save_path=save_path)
-        
 
-def compare_coherences(dataset_root, analysis_folder):
-    pmi_c = Counter()
-    npmi_c = Counter()
-    with open(os.path.join(dataset_root, analysis_folder, "coherences.txt"), "r") as fp:
-        reader = csv.reader(fp, delimiter="\t")
-        for i, row in enumerate(reader):
-            if i != 0:
-                topic_num = row[0].split("_")[2].split("topics")[1]
-                pmi = float(row[1])
-                npmi = float(row[2])
-                if topic_num in pmi_c:
-                    pmi_c[topic_num].append(pmi)
-                else:
-                    pmi_c[topic_num] = [pmi]
-                if topic_num in npmi_c:
-                    npmi_c[topic_num].append(npmi)
-                else:
-                    npmi_c[topic_num] = [npmi]
-    return pmi_c, npmi_c
-
-def compare_dataset_coherences():
-    datasets = [
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_steo_all_bigram"),
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_aeo_all_bigram"),
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "greyroads_ieo_all_bigram"),
-        os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_all_bigram"),
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_coal_bigram"),
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_biofuels_bigram"),
-        # os.path.join(os.environ['ROADMAP_SCRAPER'], "DTM", "journal_energy_policy_applied_energy_all_years_abstract_solar_bigram")
-    ]
-    pmi = Counter()
-    npmi = Counter()
-    from statistics import median
-    for dataset in datasets:
-        pmi_c, npmi_c = compare_coherences(dataset, "analysis_all_eurovoc_topics")
-        pmi.update(pmi_c)
-        npmi.update(npmi_c)
-    for topic_num in pmi:
-        pmi_vals = pmi[topic_num]
-        npmi_vals = npmi[topic_num]
-        print(f"For models with {topic_num} topics\n\tAverage pmi is: {sum(pmi_vals)/len(pmi_vals)}\n\tMedian pmi is: {median(pmi_vals)}")
-        print(f"For models with {topic_num} topics\n\tAverage npmi is: {sum(npmi_vals)/len(npmi_vals)}\n\tMedian npmi is: {median(npmi_vals)}")
-        print("-----")
-    print("==========")
 
 if __name__ == "__main__":
     NDOCS = 2686 # number of lines in -mult.dat file.
@@ -832,6 +444,8 @@ if __name__ == "__main__":
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
         model_out_dir="k30_a0.01_var0.05",
-        eurovoc_whitelist=True,
-        whitelist_path=whitelist_label_path,
+        # eurovoc_whitelist=True,
+        # whitelist_path=whitelist_label_path,
         )
+    # topic_names = analysis.get_topic_names()
+    emb_topic_names = analysis.get_topic_names(_type="embedding")
