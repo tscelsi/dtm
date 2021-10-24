@@ -14,6 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import numpy as np
 import re
 import csv
+import json
 import pickle
 from sklearn.metrics.pairwise import cosine_similarity
 import gensim
@@ -90,6 +91,15 @@ class DTMAnalysis:
         self.eurovoc_path = eurovoc_path if eurovoc_path else EUROVOC_PATH
         self.whitelist_path = whitelist_path if whitelist_path else WHITELIST_EUROVOC_LABELS_PATH
         self.eurovoc_label_remapping = eurovoc_label_remapping if eurovoc_label_remapping else self.eurovoc_label_remapping
+        # if we're passed a string, let's try load it as a json obj. if this doesn't work, throw error
+        if isinstance(self.eurovoc_label_remapping, str):
+            try:
+                with open(self.eurovoc_label_remapping, "r") as fp:
+                    self.eurovoc_label_remapping = json.load(fp)
+            except FileNotFoundError:
+                print("The remapping string that was passed didn't lead to a json file with a EuroVoc remapping.\
+                     Try changing the path, or remove the eurovoc_label_remapping argument.")
+                sys.exit(1)
         self.eurovoc_whitelist = eurovoc_whitelist
         if self.eurovoc_whitelist:
             self.whitelist_eurovoc_labels = [x.strip() for x in open(self.whitelist_path, "r").readlines()]
@@ -159,12 +169,16 @@ class DTMAnalysis:
         assert self.docs_per_year == self.doc_topic_gammas.groupby('year').count()['topic_dist'].tolist()
 
     def save_gammas(self, save_path, split=True):
+        doc_ids = pd.read_csv(os.path.join(self.model_root, "doc_ids.csv"))
+        assert len(doc_ids) == len(self.doc_topic_gammas)
         if split:
             tmp_df = pd.DataFrame(self.doc_topic_gammas['topic_dist'].tolist(), columns=[i for i in range(self.ntopics)])
             tmp_df['year'] = self.doc_topic_gammas['year']
+            tmp_df['doc_id'] = doc_ids['doc_id']
             tmp_df.to_csv(save_path)
             del tmp_df
         else:
+            self.doc_topic_gammas['doc_id'] = doc_ids['doc_id']
             self.doc_topic_gammas.to_csv(save_path)
 
     def _create_eurovoc_embedding_matrix(self):
@@ -238,6 +252,7 @@ class DTMAnalysis:
             m = self.eurovoc.apply(lambda x: x.MT.lower() in self.whitelist_eurovoc_labels, axis=1)
             self.eurovoc = self.eurovoc[m]
         self.eurovoc['index'] = [i for i in range(len(self.eurovoc))]
+        assert len(self.eurovoc['MT'].drop_duplicates()) == len(self.whitelist_eurovoc_labels)
         self.eurovoc = self.eurovoc.set_index('index')
         self._create_eurovoc_label_term_map()
         # self.eurovoc_terms = [doc for doc in self.nlp.pipe(self.eurovoc['TERMS (PT-NPT)'], disable=['tok2vec', 'ner', 'parser', 'tagger'], batch_size=256, n_process=11)]
@@ -750,7 +765,7 @@ if __name__ == "__main__":
     tdma = DTMAnalysis(
         NDOCS, 
         NTOPICS,
-        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_last_20_years_min_freq_80_12_09_21"),
+        model_root=os.path.join(os.environ['DTM_ROOT'], "dtm", "datasets", "all_2a_last_20_years_min_freq_80_21_09_21"),
         doc_year_map_file_name="model-year.dat",
         seq_dat_file_name="model-seq.dat",
         vocab_file_name="vocab.txt",
@@ -759,11 +774,12 @@ if __name__ == "__main__":
         eurovoc_label_remapping=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "remapping.json"),
         whitelist_path=os.path.join(os.environ['DTM_ROOT'], "dtm", "eurovoc_label_filtering", "eurovoc_labels_merged.txt")
         )
+    
     # topic_names = tdma.get_topic_names(_type="embedding", stringify=False)
     # names = tdma.get_topic_names(_type="embedding", raw=True, stringify=False)
     # tdma._init_eurovoc()
     # tdma._init_embeddings(load=False, save=True)
     # tdma.plot_words_from_topic(1, ["greenhouse_gas"])
-    # tdma.save_gammas()
+    tdma.save_gammas("gg")
     breakpoint()
     print("he")
